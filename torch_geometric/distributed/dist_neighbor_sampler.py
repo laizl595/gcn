@@ -114,13 +114,8 @@ class DistNeighborSampler:
             temporal_strategy=self.temporal_strategy,
             time_attr=self.time_attr,
         )
-
-        self.num_hops = self._sampler.num_neighbors.num_hops
-        self.node_types = self._sampler.node_types
-        self.edge_types = self._sampler.edge_types
-        self.node_time = self._sampler.node_time
-
-        rpc_sample_callee = RPCSamplingCallee(self)
+        self.edge_permutation = self._sampler.perm
+        rpc_sample_callee = RpcSamplingCallee(self._sampler, self.device)
         self.rpc_sample_callee_id = rpc_register(rpc_sample_callee)
 
     def init_event_loop(self) -> None:
@@ -715,6 +710,9 @@ class DistNeighborSampler:
                 efeats = None
 
         output.metadata = (*output.metadata, nfeats, nlabels, efeats)
+        # if self.is_hetero:
+        #     output.row = remap_keys(output.row, self._sampler.to_edge_type)
+        #     output.col = remap_keys(output.col, self._sampler.to_edge_type)
         return output
 
     @property
