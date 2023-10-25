@@ -1,3 +1,4 @@
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple, Union
 
@@ -6,7 +7,7 @@ import torch
 from torch import Tensor
 
 from torch_geometric.sampler import SamplerOutput
-from torch_geometric.typing import EdgeType, NodeType
+from torch_geometric.typing import EdgeType, List, NodeType
 
 
 @dataclass
@@ -16,14 +17,16 @@ class NodeDict:
     2) The nodes with duplicates that are further needed to create COO output
     3) The output nodes without duplicates
     """
-    def __init__(self, node_types):
-        self.src: Dict[NodeType,
-                       Tensor] = Dict.fromkeys(node_types, torch.empty(0))
-        self.with_dupl: Dict[NodeType,
-                             Tensor] = Dict.fromkeys(node_types,
-                                                     torch.empty(0))
-        self.out: Dict[NodeType,
-                       Tensor] = Dict.fromkeys(node_types, torch.empty(0))
+    def __init__(self, node_types, num_hops):
+        self.src: Dict[NodeType, List[Tensor]] = defaultdict(list)
+        self.with_dupl: Dict[NodeType, Tensor] = defaultdict()
+        self.out: Dict[NodeType, Tensor] = defaultdict()
+
+        for k in node_types:
+            self.src.update(
+                {k: (num_hops + 1) * [torch.empty(0, dtype=torch.int64)]})
+            self.with_dupl.update({k: torch.empty(0, dtype=torch.int64)})
+            self.out.update({k: torch.empty(0, dtype=torch.int64)})
 
 
 @dataclass
