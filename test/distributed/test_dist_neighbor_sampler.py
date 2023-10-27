@@ -123,7 +123,7 @@ def dist_neighbor_sampler_homo(
                               disjoint=disjoint)
 
     # evaluate node sample function
-    out = sampler._sample(input_node)  # change to node_sampleś
+    out = node_sample(inputs, sampler._sample)
 
     # compare distributed output with single machine output
     assert torch.equal(out_dist.node, out.node)

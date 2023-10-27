@@ -250,12 +250,13 @@ class DistNeighborSampler:
 
             # loop over the layers
             for i in range(self.num_hops):
-                # iterate over the edge types
+                # sample neighbors per edge type
                 for edge_type in self.edge_types:
                     src = edge_type[0] if not self.csc else edge_type[2]
 
                     if node_dict.src[src][i].numel() == 0:
-                        # there are no src nodes of this type in the current layer
+                        # there are no src nodes of this type in the
+                        # current layer
                         num_sampled_edges_dict[edge_type].append(0)
                         continue
 
@@ -267,6 +268,7 @@ class DistNeighborSampler:
                     else:
                         one_hop_num = self.num_neighbors[edge_type][i]
 
+                    # sample neighbors
                     out = await self.sample_one_hop(
                         node_dict.src[src][i],
                         one_hop_num,
@@ -276,8 +278,8 @@ class DistNeighborSampler:
                     )
 
                     if out.node.numel() == 0:
-                        num_sampled_edges_dict[edge_type].append(0)
                         # no neighbors were sampled
+                        num_sampled_edges_dict[edge_type].append(0)
                         continue
 
                     dst = edge_type[2] if not self.csc else edge_type[0]
@@ -299,6 +301,8 @@ class DistNeighborSampler:
                     node_dict.src[dst][i + 1] = torch.cat(
                         [node_dict.src[dst][i + 1], node_src])
 
+                    # save sampled nodes with duplicates to be able to create
+                    # local edge indices
                     node_dict.with_dupl[dst] = torch.cat(
                         [node_dict.with_dupl[dst], out.node])
                     edge_dict[edge_type] = torch.cat(
@@ -308,6 +312,8 @@ class DistNeighborSampler:
                         batch_dict.with_dupl[dst] = torch.cat(
                             [batch_dict.with_dupl[dst], out.batch])
 
+                    # collect sampled neighbors per node separately
+                    # for each layer
                     sampled_nbrs_per_node_dict[edge_type][i] += out.metadata[0]
 
                     num_sampled_edges_dict[edge_type].append(len(out.node))
@@ -319,6 +325,7 @@ class DistNeighborSampler:
             sampled_nbrs_per_node_dict = remap_keys(sampled_nbrs_per_node_dict,
                                                     self._sampler.to_rel_type)
 
+            # create local edge indices for a batch
             row_dict, col_dict = torch.ops.pyg.hetero_relabel_neighborhood(
                 self.node_types,
                 self.edge_types,
