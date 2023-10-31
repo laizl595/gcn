@@ -33,6 +33,8 @@ from torch_geometric.sampler import (
     NeighborSampler,
     NodeSamplerInput,
     SamplerOutput,
+    NegativeSampling,
+    edge_sample,
 )
 from torch_geometric.sampler.base import NumNeighbors, SubgraphType
 from torch_geometric.sampler.utils import remap_keys
@@ -128,6 +130,30 @@ class DistNeighborSampler:
         self.event_loop.add_task(
             coro=self._sample_from(self.node_sample, inputs), callback=cb)
         return None
+
+    # Edge-based distributed sampling #########################################
+
+    def sample_from_edges(
+         self,
+         inputs: EdgeSamplerInput,
+         neg_sampling: Optional[NegativeSampling] = None,
+         **kwargs,
+     ) -> Optional[Union[SamplerOutput, HeteroSamplerOutput]]:
+         if self.channel is None:
+             # synchronous sampling
+             return self.event_loop.run_task(coro=self._sample_from(
+                 edge_sample, inputs, self.node_sample,
+                 self._sampler.num_nodes, self.disjoint,
+                 self._sampler.node_time, neg_sampling, distributed=True, event_loop=self.event_loop))
+
+         # asynchronous sampling
+         cb = kwargs.get('callback', None)
+         self.event_loop.add_task(
+             coro=self._sample_from(edge_sample, inputs, self.node_sample,
+                                    self._sampler.num_nodes, self.disjoint,
+                                    self._sampler.node_time, neg_sampling,
+                                    distributed=True, event_loop=self.event_loop), callback=cb)
+         return None
 
     async def _sample_from(
         self,
@@ -362,7 +388,7 @@ class DistNeighborSampler:
             num_sampled_edges = []
 
             # loop over the layers
-            for one_hop_num in self.num_neighbors:
+            for i, one_hop_num in enumerate(self.num_neighbors):
                 out = await self.sample_one_hop(src, one_hop_num, seed_time,
                                                 src_batch)
                 if out.node.numel() == 0:
@@ -378,6 +404,12 @@ class DistNeighborSampler:
 
                 if self.disjoint:
                     batch_with_dupl.append(out.batch)
+
+                if seed_time is not None and i < self.num_hops - 1:
+                    # get seed_time for the next layer based on the previous
+                    # seed_time and sampled neighbors per node info
+                    seed_time = torch.repeat_interleave(
+                        seed_time, torch.as_tensor(out.metadata[0]))
 
                 num_sampled_nodes.append(len(src))
                 num_sampled_edges.append(len(out.node))
@@ -625,17 +657,15 @@ class DistNeighborSampler:
         )
         node, edge, cumsum_neighbors_per_node = out
 
-        batch = None
-        # return batch only during temporal sampling
         if self.disjoint and node_time is not None:
-            batch, node = node.t().contiguous()
+            _, node = node.t().contiguous()
 
         return SamplerOutput(
             node=node,
             row=None,
             col=None,
             edge=edge,
-            batch=batch,
+            batch=None,
             metadata=(cumsum_neighbors_per_node, ),
         )
 

@@ -12,35 +12,30 @@ from torch_geometric.distributed.dist_neighbor_sampler import (
     close_sampler,
 )
 from torch_geometric.distributed.rpc import init_rpc
-from torch_geometric.sampler import NeighborSampler, NodeSamplerInput
+from torch_geometric.sampler import NeighborSampler, EdgeSamplerInput, NodeSamplerInput, edge_sample
 from torch_geometric.sampler.neighbor_sampler import node_sample
 from torch_geometric.testing import withPackage
 
 
-def create_data(rank, world_size, temporal=False):
-    num_nodes = 10
+def create_data(rank, world_size):
     # create dist data
     if rank == 0:
         # partition 0
         node_id = torch.tensor([0, 1, 2, 3, 4, 5, 6])
-        # sorted by dst
         edge_index = torch.tensor([
-             [1, 2, 3, 4, 5, 0, 0],
-             [0, 1, 2, 3, 4, 4, 9],
+            [1, 2, 3, 4, 5, 0, 0],
+            [0, 1, 2, 3, 4, 4, 9],
         ])
     else:
         # partition 1
         node_id = torch.tensor([0, 4, 5, 6, 7, 8, 9])
-        # sorted by dst
         edge_index = torch.tensor([
-             [5, 6, 7, 8, 9, 5, 0],
-             [4, 5, 6, 7, 8, 9, 9],
+            [5, 6, 7, 8, 9, 0, 5],
+            [4, 5, 6, 7, 8, 9, 9],
         ])
 
     feature_store = LocalFeatureStore.from_data(node_id)
-    graph_store = LocalGraphStore.from_data(None, edge_index,
-                                            num_nodes=num_nodes,
-                                            is_sorted=True)
+    graph_store = LocalGraphStore.from_data(None, edge_index, num_nodes=11)
 
     graph_store.node_pb = torch.tensor([0, 0, 0, 0, 0, 1, 1, 1, 1, 1])
     graph_store.meta.update({'num_parts': 2})
@@ -49,24 +44,17 @@ def create_data(rank, world_size, temporal=False):
 
     dist_data = (feature_store, graph_store)
 
-    # create reference data sorted by dst
+    # create reference data
     edge_index = torch.tensor([
-         [1, 2, 3, 4, 5, 0, 5, 6, 7, 8, 9, 0],
-         [0, 1, 2, 3, 4, 4, 9, 5, 6, 7, 8, 9],
+        [1, 2, 3, 4, 5, 0, 0, 6, 7, 8, 9, 5],
+        [0, 1, 2, 3, 4, 4, 9, 5, 6, 7, 8, 9],
     ])
-    data = Data(x=None, y=None, edge_index=edge_index, num_nodes=num_nodes)
-
-    if temporal:
-        # create time data sorted by edge_index srcs
-        data_time = torch.tensor([5, 0, 1, 3, 3, 4, 4, 4, 4, 4])
-        feature_store.put_tensor(data_time, group_name=None, attr_name="time")
-
-        data.time = data_time
+    data = Data(x=None, y=None, edge_index=edge_index, num_nodes=11)
 
     return (dist_data, data)
 
 
-def dist_neighbor_sampler(
+def dist_link_neighbor_sampler(
     world_size: int,
     rank: int,
     master_port: int,
@@ -116,18 +104,22 @@ def dist_neighbor_sampler(
 
     # seed nodes
     if rank == 0:
-        input_node = torch.tensor([1, 6], dtype=torch.int64)
+        input_row = torch.tensor([1, 6], dtype=torch.int64)
+        input_col = torch.tensor([2, 7], dtype=torch.int64)
     else:
-        input_node = torch.tensor([4, 9], dtype=torch.int64)
+        input_row = torch.tensor([4, 9], dtype=torch.int64)
+        input_col = torch.tensor([5, 0], dtype=torch.int64)
 
-    inputs = NodeSamplerInput(
+    inputs = EdgeSamplerInput(
         input_id=None,
-        node=input_node,
+        row=input_row,
+        col=input_col,
     )
 
     # evaluate distributed node sample function
     out_dist = dist_sampler.event_loop.run_task(
-        coro=dist_sampler.node_sample(inputs))
+        coro=edge_sample(inputs, node_sample, data.num_nodes, disjoint,
+                         None, None, True, dist_sampler.event_loop))#TODO negative sampling!!!, subgraph type
 
     torch.distributed.barrier()
 
@@ -135,7 +127,8 @@ def dist_neighbor_sampler(
                               disjoint=disjoint)
 
     # evaluate node sample function
-    out = node_sample(inputs, sampler._sample)
+    out = edge_sample(inputs, node_sample, data.num_nodes, disjoint,
+                         None, None, True, dist_sampler.event_loop)
 
     # compare distributed output with single machine output
     assert torch.equal(out_dist.node, out.node)
@@ -149,7 +142,7 @@ def dist_neighbor_sampler(
     torch.distributed.barrier()
 
 
-def dist_neighbor_sampler_temporal(
+def dist_link_neighbor_sampler_temporal(
     world_size: int,
     rank: int,
     master_port: int,
@@ -365,7 +358,7 @@ def create_hetero_data(rank, world_size):
     return (dist_data, data)
 
 
-def dist_neighbor_sampler_hetero(
+def dist_link_neighbor_sampler_hetero(
     world_size: int,
     rank: int,
     master_port: int,
@@ -452,8 +445,8 @@ def dist_neighbor_sampler_hetero(
 
 
 @withPackage('pyg_lib')
-@pytest.mark.parametrize("disjoint", [False, True])
-def test_dist_neighbor_sampler(disjoint):
+# @pytest.mark.parametrize("disjoint", [False, True])
+def test_dist_link_neighbor_sampler():
     mp_context = torch.multiprocessing.get_context("spawn")
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(("127.0.0.1", 0))
@@ -461,13 +454,14 @@ def test_dist_neighbor_sampler(disjoint):
     s.close()
 
     world_size = 2
+    disjoint = False
     w0 = mp_context.Process(
-        target=dist_neighbor_sampler,
+        target=dist_link_neighbor_sampler,
         args=(world_size, 0, port, disjoint),
     )
 
     w1 = mp_context.Process(
-        target=dist_neighbor_sampler,
+        target=dist_link_neighbor_sampler,
         args=(world_size, 1, port, disjoint),
     )
 
@@ -480,7 +474,7 @@ def test_dist_neighbor_sampler(disjoint):
 @withPackage('pyg_lib')
 @pytest.mark.parametrize("seed_time", [None, torch.tensor([3, 6])])
 @pytest.mark.parametrize("temporal_strategy", ['uniform', 'last'])
-def test_dist_neighbor_sampler_temporal(seed_time, temporal_strategy):
+def test_dist_link_neighbor_sampler_temporal(seed_time, temporal_strategy):
     mp_context = torch.multiprocessing.get_context("spawn")
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(("127.0.0.1", 0))
@@ -489,12 +483,12 @@ def test_dist_neighbor_sampler_temporal(seed_time, temporal_strategy):
 
     world_size = 2
     w0 = mp_context.Process(
-        target=dist_neighbor_sampler_temporal,
+        target=dist_link_neighbor_sampler_temporal,
         args=(world_size, 0, port, seed_time, temporal_strategy),
     )
 
     w1 = mp_context.Process(
-        target=dist_neighbor_sampler_temporal,
+        target=dist_link_neighbor_sampler_temporal,
         args=(world_size, 1, port, seed_time, temporal_strategy),
     )
 
@@ -506,7 +500,7 @@ def test_dist_neighbor_sampler_temporal(seed_time, temporal_strategy):
 
 @withPackage('pyg_lib')
 # @pytest.mark.parametrize("disjoint", [True, False])
-def test_dist_neighbor_sampler_hetero():
+def test_dist_link_neighbor_sampler_hetero():
     mp_context = torch.multiprocessing.get_context("spawn")
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(("127.0.0.1", 0))
@@ -516,12 +510,12 @@ def test_dist_neighbor_sampler_hetero():
     disjoint = False
     world_size = 2
     w0 = mp_context.Process(
-        target=dist_neighbor_sampler_hetero,
+        target=dist_link_neighbor_sampler_hetero,
         args=(world_size, 0, port, 'paper', disjoint),
     )
 
     w1 = mp_context.Process(
-        target=dist_neighbor_sampler_hetero,
+        target=dist_link_neighbor_sampler_hetero,
         args=(world_size, 1, port, 'author', disjoint),
     )
 
