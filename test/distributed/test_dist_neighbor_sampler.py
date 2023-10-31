@@ -25,16 +25,16 @@ def create_data(rank, world_size, temporal=False):
         node_id = torch.tensor([0, 1, 2, 3, 4, 5, 6])
         # sorted by dst
         edge_index = torch.tensor([
-             [1, 2, 3, 4, 5, 0, 0],
-             [0, 1, 2, 3, 4, 4, 9],
+            [1, 2, 3, 4, 5, 0, 0],
+            [0, 1, 2, 3, 4, 4, 9],
         ])
     else:
         # partition 1
         node_id = torch.tensor([0, 4, 5, 6, 7, 8, 9])
         # sorted by dst
         edge_index = torch.tensor([
-             [5, 6, 7, 8, 9, 5, 0],
-             [4, 5, 6, 7, 8, 9, 9],
+            [5, 6, 7, 8, 9, 5, 0],
+            [4, 5, 6, 7, 8, 9, 9],
         ])
 
     feature_store = LocalFeatureStore.from_data(node_id)
@@ -51,8 +51,8 @@ def create_data(rank, world_size, temporal=False):
 
     # create reference data sorted by dst
     edge_index = torch.tensor([
-         [1, 2, 3, 4, 5, 0, 5, 6, 7, 8, 9, 0],
-         [0, 1, 2, 3, 4, 4, 9, 5, 6, 7, 8, 9],
+        [1, 2, 3, 4, 5, 0, 5, 6, 7, 8, 9, 0],
+        [0, 1, 2, 3, 4, 4, 9, 5, 6, 7, 8, 9],
     ])
     data = Data(x=None, y=None, edge_index=edge_index, num_nodes=num_nodes)
 

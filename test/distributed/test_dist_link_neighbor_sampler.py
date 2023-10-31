@@ -12,7 +12,12 @@ from torch_geometric.distributed.dist_neighbor_sampler import (
     close_sampler,
 )
 from torch_geometric.distributed.rpc import init_rpc
-from torch_geometric.sampler import NeighborSampler, EdgeSamplerInput, NodeSamplerInput, edge_sample
+from torch_geometric.sampler import (
+    EdgeSamplerInput,
+    NeighborSampler,
+    NodeSamplerInput,
+    edge_sample,
+)
 from torch_geometric.sampler.neighbor_sampler import node_sample
 from torch_geometric.testing import withPackage
 
@@ -117,9 +122,9 @@ def dist_link_neighbor_sampler(
     )
 
     # evaluate distributed node sample function
-    out_dist = dist_sampler.event_loop.run_task(
-        coro=edge_sample(inputs, node_sample, data.num_nodes, disjoint,
-                         None, None, True, dist_sampler.event_loop))#TODO negative sampling!!!, subgraph type
+    out_dist = dist_sampler.event_loop.run_task(coro=edge_sample(
+        inputs, node_sample, data.num_nodes, disjoint, None, None, True,
+        dist_sampler.event_loop))  #TODO negative sampling!!!, subgraph type
 
     torch.distributed.barrier()
 
@@ -127,8 +132,8 @@ def dist_link_neighbor_sampler(
                               disjoint=disjoint)
 
     # evaluate node sample function
-    out = edge_sample(inputs, node_sample, data.num_nodes, disjoint,
-                         None, None, True, dist_sampler.event_loop)
+    out = edge_sample(inputs, node_sample, data.num_nodes, disjoint, None,
+                      None, True, dist_sampler.event_loop)
 
     # compare distributed output with single machine output
     assert torch.equal(out_dist.node, out.node)

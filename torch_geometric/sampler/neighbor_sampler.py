@@ -163,9 +163,10 @@ class NeighborSampler(BaseSampler):
                 if time_attr is not None:
                     if len(time_attrs) != 1:
                         raise ValueError("Temporal sampling specified but did "
-                                        "not find any temporal data")
+                                         "not find any temporal data")
                     else:
-                        time_attrs[0].index = None  # Reset index for full data.
+                        time_attrs[
+                            0].index = None  # Reset index for full data.
                         time_tensor = feature_store.get_tensor(time_attrs[0])
                         self.node_time = time_tensor
 
@@ -654,9 +655,10 @@ def edge_sample(
             seed_time = torch.cat([src_time, dst_time])
 
         if distributed:
-            out = asyncio.run(sample_fn(
-                 NodeSamplerInput(inputs.input_id, seed, seed_time,
-                                  input_type=None)))
+            out = asyncio.run(
+                sample_fn(
+                    NodeSamplerInput(inputs.input_id, seed, seed_time,
+                                     input_type=None)))
         else:
             out = sample_fn(seed, seed_time)
 

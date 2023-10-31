@@ -16,8 +16,6 @@ classes = [
     'HGTSampler',
 ]
 
-functions = [
-    'edge_sample'
-]
+functions = ['edge_sample']
 
 __all__ = classes + functions

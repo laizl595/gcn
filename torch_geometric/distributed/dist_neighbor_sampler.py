@@ -30,10 +30,10 @@ from torch_geometric.distributed.utils import (
 from torch_geometric.sampler import (
     EdgeSamplerInput,
     HeteroSamplerOutput,
+    NegativeSampling,
     NeighborSampler,
     NodeSamplerInput,
     SamplerOutput,
-    NegativeSampling,
     edge_sample,
 )
 from torch_geometric.sampler.base import NumNeighbors, SubgraphType
@@ -134,26 +134,27 @@ class DistNeighborSampler:
     # Edge-based distributed sampling #########################################
 
     def sample_from_edges(
-         self,
-         inputs: EdgeSamplerInput,
-         neg_sampling: Optional[NegativeSampling] = None,
-         **kwargs,
-     ) -> Optional[Union[SamplerOutput, HeteroSamplerOutput]]:
-         if self.channel is None:
-             # synchronous sampling
-             return self.event_loop.run_task(coro=self._sample_from(
-                 edge_sample, inputs, self.node_sample,
-                 self._sampler.num_nodes, self.disjoint,
-                 self._sampler.node_time, neg_sampling, distributed=True, event_loop=self.event_loop))
+        self,
+        inputs: EdgeSamplerInput,
+        neg_sampling: Optional[NegativeSampling] = None,
+        **kwargs,
+    ) -> Optional[Union[SamplerOutput, HeteroSamplerOutput]]:
+        if self.channel is None:
+            # synchronous sampling
+            return self.event_loop.run_task(coro=self._sample_from(
+                edge_sample, inputs, self.node_sample, self._sampler.num_nodes,
+                self.disjoint, self._sampler.node_time, neg_sampling,
+                distributed=True, event_loop=self.event_loop))
 
-         # asynchronous sampling
-         cb = kwargs.get('callback', None)
-         self.event_loop.add_task(
-             coro=self._sample_from(edge_sample, inputs, self.node_sample,
-                                    self._sampler.num_nodes, self.disjoint,
-                                    self._sampler.node_time, neg_sampling,
-                                    distributed=True, event_loop=self.event_loop), callback=cb)
-         return None
+        # asynchronous sampling
+        cb = kwargs.get('callback', None)
+        self.event_loop.add_task(
+            coro=self._sample_from(edge_sample, inputs, self.node_sample,
+                                   self._sampler.num_nodes, self.disjoint,
+                                   self._sampler.node_time, neg_sampling,
+                                   distributed=True,
+                                   event_loop=self.event_loop), callback=cb)
+        return None
 
     async def _sample_from(
         self,
