@@ -1,7 +1,8 @@
+import asyncio
 import itertools
 import logging
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -139,21 +140,19 @@ class DistNeighborSampler:
         neg_sampling: Optional[NegativeSampling] = None,
         **kwargs,
     ) -> Optional[Union[SamplerOutput, HeteroSamplerOutput]]:
+        edge_coro = asyncio.to_thread(edge_sample, inputs, self.node_sample,
+                                      self._sampler.num_nodes, self.disjoint,
+                                      self._sampler.node_time, neg_sampling,
+                                      distributed=True)
+
         if self.channel is None:
             # synchronous sampling
-            return self.event_loop.run_task(coro=self._sample_from(
-                edge_sample, inputs, self.node_sample, self._sampler.num_nodes,
-                self.disjoint, self._sampler.node_time, neg_sampling,
-                distributed=True, event_loop=self.event_loop))
+            return self.event_loop.run_task(coro=self._sample_from(edge_coro))
 
         # asynchronous sampling
         cb = kwargs.get('callback', None)
-        self.event_loop.add_task(
-            coro=self._sample_from(edge_sample, inputs, self.node_sample,
-                                   self._sampler.num_nodes, self.disjoint,
-                                   self._sampler.node_time, neg_sampling,
-                                   distributed=True,
-                                   event_loop=self.event_loop), callback=cb)
+        self.event_loop.add_task(coro=self._sample_from(edge_coro),
+                                 callback=cb)
         return None
 
     async def _sample_from(
@@ -162,8 +161,12 @@ class DistNeighborSampler:
         *args,
         **kwargs,
     ) -> Optional[Union[SamplerOutput, HeteroSamplerOutput]]:
+        if async_func.__name__ == 'to_thread':
+            # call edge sample coroutine
+            await async_func
+        else:
+            sampler_output = await async_func(*args, **kwargs)
 
-        sampler_output = await async_func(*args, **kwargs)
         res = await self._collate_fn(sampler_output)
 
         if self.channel is None:
@@ -196,7 +199,7 @@ class DistNeighborSampler:
         if isinstance(inputs, NodeSamplerInput):
             seed = inputs.node.to(self.device)
             seed_time = (inputs.time.to(self.device)
-                         if inputs.time is not None else None)
+                         if inputs.time is not None else self.node_time[seed])
             src_batch = torch.arange(batch_size) if self.disjoint else None
             seed_dict = {input_type: seed}
             seed_time_dict: Dict[NodeType, Tensor] = {input_type: seed_time}

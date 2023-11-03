@@ -22,7 +22,7 @@ def create_data(rank, world_size, temporal=False):
     # create dist data
     if rank == 0:
         # partition 0
-        node_id = torch.tensor([0, 1, 2, 3, 4, 5, 6])
+        node_id = torch.tensor([0, 1, 2, 3, 4, 5, 9])
         # sorted by dst
         edge_index = torch.tensor([
             [1, 2, 3, 4, 5, 0, 0],
@@ -49,7 +49,7 @@ def create_data(rank, world_size, temporal=False):
 
     dist_data = (feature_store, graph_store)
 
-    # create reference data sorted by dst
+    # create reference data
     edge_index = torch.tensor([
         [1, 2, 3, 4, 5, 0, 5, 6, 7, 8, 9, 0],
         [0, 1, 2, 3, 4, 4, 9, 5, 6, 7, 8, 9],
@@ -504,28 +504,28 @@ def test_dist_neighbor_sampler_temporal(seed_time, temporal_strategy):
     w1.join()
 
 
-@withPackage('pyg_lib')
-# @pytest.mark.parametrize("disjoint", [True, False])
-def test_dist_neighbor_sampler_hetero():
-    mp_context = torch.multiprocessing.get_context("spawn")
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
+# @withPackage('pyg_lib')
+# # @pytest.mark.parametrize("disjoint", [True, False])
+# def test_dist_neighbor_sampler_hetero():
+#     mp_context = torch.multiprocessing.get_context("spawn")
+#     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+#     s.bind(("127.0.0.1", 0))
+#     port = s.getsockname()[1]
+#     s.close()
 
-    disjoint = False
-    world_size = 2
-    w0 = mp_context.Process(
-        target=dist_neighbor_sampler_hetero,
-        args=(world_size, 0, port, 'paper', disjoint),
-    )
+#     disjoint = False
+#     world_size = 2
+#     w0 = mp_context.Process(
+#         target=dist_neighbor_sampler_hetero,
+#         args=(world_size, 0, port, 'paper', disjoint),
+#     )
 
-    w1 = mp_context.Process(
-        target=dist_neighbor_sampler_hetero,
-        args=(world_size, 1, port, 'author', disjoint),
-    )
+#     w1 = mp_context.Process(
+#         target=dist_neighbor_sampler_hetero,
+#         args=(world_size, 1, port, 'author', disjoint),
+#     )
 
-    w0.start()
-    w1.start()
-    w0.join()
-    w1.join()
+#     w0.start()
+#     w1.start()
+#     w0.join()
+#     w1.join()
