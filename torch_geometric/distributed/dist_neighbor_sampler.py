@@ -161,7 +161,7 @@ class DistNeighborSampler:
         *args,
         **kwargs,
     ) -> Optional[Union[SamplerOutput, HeteroSamplerOutput]]:
-        if async_func.__name__ == 'to_thread':
+        if len(kwargs) == 0:
             # call edge sample coroutine
             await async_func
         else:
@@ -198,8 +198,10 @@ class DistNeighborSampler:
 
         if isinstance(inputs, NodeSamplerInput):
             seed = inputs.node.to(self.device)
-            seed_time = (inputs.time.to(self.device)
-                         if inputs.time is not None else self.node_time[seed])
+            seed_time = None
+            if self.time_attr is not None:
+                seed_time = (inputs.time.to(self.device) if inputs.time
+                             is not None else self.node_time[seed])
             src_batch = torch.arange(batch_size) if self.disjoint else None
             seed_dict = {input_type: seed}
             seed_time_dict: Dict[NodeType, Tensor] = {input_type: seed_time}

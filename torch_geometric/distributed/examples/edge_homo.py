@@ -1,6 +1,3 @@
-import torch_geometric.distributed as pyg_dist
-from torch_geometric.distributed.dist_context import DistContext
-from torch_geometric.distributed.partition import load_partition_info
 import argparse
 import os.path as osp
 import time
@@ -8,15 +5,15 @@ import time
 import torch
 import torch.distributed
 import torch.nn.functional as F
-
 from ogb.nodeproppred import Evaluator
 from torch.nn.parallel import DistributedDataParallel
-from torch_geometric.nn import GraphSAGE
 
+import torch_geometric.distributed as pyg_dist
 from torch_geometric.distributed import LocalFeatureStore, LocalGraphStore
+from torch_geometric.distributed.dist_context import DistContext
+from torch_geometric.distributed.partition import load_partition_info
+from torch_geometric.nn import GraphSAGE
 from torch_geometric.sampler import NegativeSampling
-
-print("\n\n\n\n\n\n")
 
 
 @torch.no_grad()
@@ -26,26 +23,25 @@ def test(model, test_loader, dataset_name):
     xs = []
     y_true = []
     for i, batch in enumerate(test_loader):
-        if i == 0:
-            device = batch.x.device
-        x = model(batch.x, batch.edge_index)[: batch.batch_size]
+        batch_time_start = time.time()
+        x = model(batch.x, batch.edge_index)[:batch.batch_size]
         xs.append(x.cpu())
-        y_true.append(batch.y[: batch.batch_size].cpu())
-        print(f"---- test():  i={i}, batch={batch} ----")
+        y_true.append(batch.y[:batch.batch_size].cpu())
+        print(
+            f"---- test():  i={i}, batch_time={time.time() - batch_time_start} ----"
+        )
         del batch
         if i == len(test_loader) - 1:
             print(" ---- dist.barrier ----")
             torch.distributed.barrier()
-    xs = [t.to(device) for t in xs]
-    y_true = [t.to(device) for t in y_true]
+    xs = [t.to(torch.device("cpu")) for t in xs]
+    y_true = [t.to(torch.device("cpu")) for t in y_true]
     y_pred = torch.cat(xs, dim=0).argmax(dim=-1, keepdim=True)
     y_true = torch.cat(y_true, dim=0).unsqueeze(-1)
-    test_acc = evaluator.eval(
-        {
-            "y_true": y_true,
-            "y_pred": y_pred,
-        }
-    )["acc"]
+    test_acc = evaluator.eval({
+        "y_true": y_true,
+        "y_pred": y_pred,
+    })["acc"]
     return test_acc
 
 
@@ -69,15 +65,13 @@ def run_training_proc(
     test_loader_master_port: int,
 ):
     graph = LocalGraphStore.from_partition(
-        osp.join(root_dir, f"{dataset_name}-partitions"), node_rank
-    )
+        osp.join(root_dir, f"{dataset_name}-partitions"), node_rank)
     print(f"-------- graph={graph} ")
     edge_attrs = graph.get_all_edge_attrs()
     print(f"-----777---- edge_attrs ={edge_attrs}")
 
     feature = LocalFeatureStore.from_partition(
-        osp.join(root_dir, f"{dataset_name}-partitions"), node_rank
-    )
+        osp.join(root_dir, f"{dataset_name}-partitions"), node_rank)
 
     (
         meta,
@@ -85,9 +79,8 @@ def run_training_proc(
         partition_idx,
         node_pb,
         edge_pb,
-    ) = load_partition_info(
-        osp.join(root_dir, f"{dataset_name}-partitions"), node_rank
-    )
+    ) = load_partition_info(osp.join(root_dir, f"{dataset_name}-partitions"),
+                            node_rank)
 
     print(
         f"-------- meta={meta}, partition_idx={partition_idx}, node_pb={node_pb} "
@@ -105,9 +98,8 @@ def run_training_proc(
     feature.edge_feat_pb = edge_pb
     feature.meta = meta
     feature.labels = torch.load(node_label_file)
-    
+
     partition_data = (feature, graph)
-    print(f" ----- partition_data={partition_data[0]}  ")
 
     # Initialize graphlearn_torch distributed worker group context.
     current_ctx = DistContext(
@@ -134,8 +126,7 @@ def run_training_proc(
     print(f"----------- 222 ------------- ")
     # Create distributed neighbor loader for training
     train_idx = train_idx.split(
-        train_idx.size(0) // num_training_procs_per_node
-    )[local_proc_rank]
+        train_idx.size(0) // num_training_procs_per_node)[local_proc_rank]
 
     edge_label_index_train = (
         None,
@@ -147,30 +138,32 @@ def run_training_proc(
             dim=0,
         ),
     )
-    num_workers = 2
-    concurrency = 4
+    num_workers = 0
+    concurrency = 1
+    async_sampling = False
     train_loader = pyg_dist.DistLinkNeighborLoader(
         data=partition_data,
         num_workers=num_workers,
         num_neighbors=[15, 10, 5],
         batch_size=batch_size,
-        edge_label_index=edge_label_index_train,  # dataset.data.edge_index, ##TODO ???
+        edge_label_index=
+        edge_label_index_train,  # dataset.data.edge_index, ##TODO ???
         edge_label=None,
         edge_label_time=None,
         replace=False,
         directed=True,
         disjoint=False,
         temporal_strategy="uniform",
-        neg_sampling=NegativeSampling("triplet"),  # TODO support 'triplet'
+        neg_sampling=None,  # TODO support 'triplet'
         neg_sampling_ratio=1,
-        time_attr=None,
+        time_attr='time',
         transform=None,
         is_sorted=False,
         filter_per_worker=False,
         shuffle=True,
         drop_last=False,
         device=current_device,
-        async_sampling=True,
+        async_sampling=async_sampling,
         master_addr=master_addr,
         master_port=train_loader_master_port,
         concurrency=concurrency,
@@ -192,15 +185,15 @@ def run_training_proc(
     )
 
     # Create distributed neighbor loader for testing.
-    test_idx = test_idx.split(test_idx.size(0) // num_training_procs_per_node)[
-        local_proc_rank
-    ]
+    test_idx = test_idx.split(test_idx.size(0) //
+                              num_training_procs_per_node)[local_proc_rank]
     test_loader = pyg_dist.DistLinkNeighborLoader(
         data=partition_data,
         num_neighbors=[15, 10, 5],
         num_workers=num_workers,
         batch_size=batch_size,
-        edge_label_index=edge_label_index_test,  # dataset.data.edge_index, ##TODO ???
+        edge_label_index=
+        edge_label_index_test,  # dataset.data.edge_index, ##TODO ???
         edge_label=None,
         edge_label_time=None,
         replace=False,
@@ -209,14 +202,14 @@ def run_training_proc(
         temporal_strategy="uniform",
         neg_sampling=NegativeSampling("triplet"),  # TODO support 'triplet'
         neg_sampling_ratio=1,
-        time_attr=None,
+        time_attr='time',
         transform=None,
         is_sorted=False,
         filter_per_worker=False,
         shuffle=False,
         drop_last=False,
         device=current_device,
-        async_sampling=True,
+        async_sampling=async_sampling,
         master_addr=master_addr,
         master_port=test_loader_master_port,
         concurrency=concurrency,
@@ -233,8 +226,7 @@ def run_training_proc(
         out_channels=out_channels,
     ).to(current_device)
     model = DistributedDataParallel(
-        model
-    )  # , device_ids=[current_device.index])
+        model)  # , device_ids=[current_device.index])
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
     print(f"----------- 444 ------------- ")
@@ -247,10 +239,10 @@ def run_training_proc(
         for i, batch in enumerate(train_loader):
             print(f"-------- x2_worker: batch={batch}, cnt={i} --------- ")
             optimizer.zero_grad()
-            out = model(batch.x, batch.edge_index)[
-                : batch.batch_size
-            ].log_softmax(dim=-1)
-            loss = F.nll_loss(out, batch.y[: batch.batch_size])
+            out = model(
+                batch.x,
+                batch.edge_index)[:batch.batch_size].log_softmax(dim=-1)
+            loss = F.nll_loss(out, batch.y[:batch.batch_size])
             loss.backward()
             optimizer.step()
             if i == len(test_loader) - 1:
@@ -286,7 +278,7 @@ def run_training_proc(
                 "********************************************************************************************** "
             )
             print("\n\n\n\n\n\n")
-            torch.cuda.synchronize()
+            # torch.cuda.synchronize()
             torch.distributed.barrier()
 
     print(f"----------- 555 ------------- ")
@@ -294,8 +286,7 @@ def run_training_proc(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Arguments for distributed training of supervised SAGE."
-    )
+        description="Arguments for distributed training of supervised SAGE.")
     parser.add_argument(
         "--dataset",
         type=str,
@@ -366,19 +357,22 @@ if __name__ == "__main__":
         "--training_pg_master_port",
         type=int,
         default=33333,
-        help="The port used for PyTorch's process group initialization across training processes.",
+        help=
+        "The port used for PyTorch's process group initialization across training processes.",
     )
     parser.add_argument(
         "--train_loader_master_port",
         type=int,
         default=33334,
-        help="The port used for RPC initialization across all sampling workers of training loader.",
+        help=
+        "The port used for RPC initialization across all sampling workers of training loader.",
     )
     parser.add_argument(
         "--test_loader_master_port",
         type=int,
         default=33335,
-        help="The port used for RPC initialization across all sampling workers of testing loader.",
+        help=
+        "The port used for RPC initialization across all sampling workers of testing loader.",
     )
     args = parser.parse_args()
 
@@ -398,13 +392,13 @@ if __name__ == "__main__":
     f.write(
         f"* training process group master port: {args.training_pg_master_port}\n"
     )
-    f.write(f"* training loader master port: {args.train_loader_master_port}\n")
+    f.write(
+        f"* training loader master port: {args.train_loader_master_port}\n")
     f.write(f"* testing loader master port: {args.test_loader_master_port}\n")
 
     f.write("--- Loading data partition ...\n")
-    root_dir = osp.join(
-        osp.dirname(osp.realpath(__file__)), args.dataset_root_dir
-    )
+    root_dir = osp.join(osp.dirname(osp.realpath(__file__)),
+                        args.dataset_root_dir)
     data_pidx = args.node_rank % args.num_dataset_partitions
     r"""
   dataset = pyg_dist.DistDataset()
@@ -434,15 +428,13 @@ if __name__ == "__main__":
             root_dir,
             f"{args.dataset}-train-partitions",
             f"partition{data_pidx}.pt",
-        )
-    )
+        ))
     test_idx = torch.load(
         osp.join(
             root_dir,
             f"{args.dataset}-test-partitions",
             f"partition{data_pidx}.pt",
-        )
-    )
+        ))
     train_idx.share_memory_()
     test_idx.share_memory_()
 
