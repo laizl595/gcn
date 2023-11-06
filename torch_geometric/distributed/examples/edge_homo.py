@@ -156,7 +156,7 @@ def run_training_proc(
         temporal_strategy="uniform",
         neg_sampling=None,  # TODO support 'triplet'
         neg_sampling_ratio=1,
-        time_attr='time',
+        time_attr=None,
         transform=None,
         is_sorted=False,
         filter_per_worker=False,
@@ -202,7 +202,7 @@ def run_training_proc(
         temporal_strategy="uniform",
         neg_sampling=NegativeSampling("triplet"),  # TODO support 'triplet'
         neg_sampling_ratio=1,
-        time_attr='time',
+        time_attr=None,
         transform=None,
         is_sorted=False,
         filter_per_worker=False,
