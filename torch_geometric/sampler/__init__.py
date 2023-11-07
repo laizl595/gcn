@@ -1,10 +1,10 @@
 from .base import (BaseSampler, NodeSamplerInput, EdgeSamplerInput,
                    SamplerOutput, HeteroSamplerOutput, NegativeSampling,
                    NumNeighbors)
-from .neighbor_sampler import NeighborSampler, edge_sample
+from .neighbor_sampler import NeighborSampler
 from .hgt_sampler import HGTSampler
 
-classes = [
+__all__ = classes = [
     'BaseSampler',
     'NodeSamplerInput',
     'EdgeSamplerInput',
@@ -15,7 +15,3 @@ classes = [
     'NeighborSampler',
     'HGTSampler',
 ]
-
-functions = ['edge_sample']
-
-__all__ = classes + functions

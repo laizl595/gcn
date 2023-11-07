@@ -35,8 +35,8 @@ from torch_geometric.sampler import (
     NeighborSampler,
     NodeSamplerInput,
     SamplerOutput,
-    edge_sample,
 )
+from torch_geometric.sampler.neighbor_sampler import edge_sample
 from torch_geometric.sampler.base import NumNeighbors, SubgraphType
 from torch_geometric.sampler.utils import remap_keys
 from torch_geometric.typing import EdgeType, NodeType
