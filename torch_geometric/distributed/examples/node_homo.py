@@ -116,9 +116,9 @@ def run_training_proc(
     # Create distributed neighbor loader for testing.
     test_idx = test_idx.split(test_idx.size(0) //
                               num_training_procs_per_node)[local_proc_rank]
-    num_workers = 0
-    concurrency = 1
-    async_sampling = False
+    num_workers = 4
+    concurrency = 4
+    async_sampling = True
 
     # Initialize training process group of PyTorch.
     torch.distributed.init_process_group(

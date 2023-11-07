@@ -134,15 +134,16 @@ def dist_link_neighbor_sampler(
     )
 
     # evaluate distributed edge sample function
-    out_dist = edge_sample(
-        inputs,
-        dist_sampler.node_sample,
-        data.num_nodes,
-        disjoint,
-        node_time=None,
-        neg_sampling=None,
-        distributed=True,
-    )
+    # out_dist = edge_sample(
+    #     inputs,
+    #     dist_sampler.node_sample,
+    #     data.num_nodes,
+    #     disjoint,
+    #     node_time=None,
+    #     neg_sampling=None,
+    #     distributed=True,
+    # )
+    out_dist = dist_sampler.sample_from_edges(inputs, None)
 
     torch.distributed.barrier()
 

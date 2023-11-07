@@ -144,7 +144,6 @@ class DistNeighborSampler:
                                       self._sampler.num_nodes, self.disjoint,
                                       self._sampler.node_time, neg_sampling,
                                       distributed=True)
-
         if self.channel is None:
             # synchronous sampling
             return self.event_loop.run_task(coro=self._sample_from(edge_coro))
@@ -161,7 +160,7 @@ class DistNeighborSampler:
         *args,
         **kwargs,
     ) -> Optional[Union[SamplerOutput, HeteroSamplerOutput]]:
-        if len(kwargs) == 0:
+        if len(args) == 0:
             # call edge sample coroutine
             sampler_output = await async_func
         else:
