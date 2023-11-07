@@ -163,7 +163,7 @@ class DistNeighborSampler:
     ) -> Optional[Union[SamplerOutput, HeteroSamplerOutput]]:
         if len(kwargs) == 0:
             # call edge sample coroutine
-            await async_func
+            sampler_output = await async_func
         else:
             sampler_output = await async_func(*args, **kwargs)
 
