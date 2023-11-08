@@ -237,7 +237,7 @@ def run_training_proc(
         start = time.time()
         cnt = 0
         for i, batch in enumerate(train_loader):
-            print(f"-------- x2_worker: batch={batch}, cnt={i} --------- ")
+            # print(f"-------- x2_worker: batch={batch}, cnt={i} --------- ")
             optimizer.zero_grad()
             out = model(
                 batch.x,
@@ -248,6 +248,8 @@ def run_training_proc(
             if i == len(test_loader) - 1:
                 print(" ---- dist.barrier ----")
                 torch.distributed.barrier()
+            if i == 30:
+                break
 
         end = time.time()
         f.write(
@@ -264,22 +266,22 @@ def run_training_proc(
 
         # Test accuracy.
         # if epoch == 0 or epoch > (epochs // 2):
-        if epoch % 1 == 0:  # or epoch > (epochs // 2):
-            test_acc = test(model, test_loader, dataset_name)
-            f.write(
-                f"-- [Trainer {current_ctx.rank}] Test Accuracy: {test_acc:.4f}\n"
-            )
-            print(
-                f"-- [Trainer {current_ctx.rank}] Test Accuracy: {test_acc:.4f}\n"
-            )
+        # if epoch % 1 == 0:  # or epoch > (epochs // 2):
+        #     test_acc = test(model, test_loader, dataset_name)
+        #     f.write(
+        #         f"-- [Trainer {current_ctx.rank}] Test Accuracy: {test_acc:.4f}\n"
+        #     )
+        #     print(
+        #         f"-- [Trainer {current_ctx.rank}] Test Accuracy: {test_acc:.4f}\n"
+        #     )
 
-            print("\n\n\n\n\n\n")
-            print(
-                "********************************************************************************************** "
-            )
-            print("\n\n\n\n\n\n")
-            # torch.cuda.synchronize()
-            torch.distributed.barrier()
+        #     print("\n\n\n\n\n\n")
+        #     print(
+        #         "********************************************************************************************** "
+        #     )
+        #     print("\n\n\n\n\n\n")
+        #     # torch.cuda.synchronize()
+        #     torch.distributed.barrier()
 
     print(f"----------- 555 ------------- ")
 
