@@ -469,7 +469,6 @@ def edge_sample(
     disjoint: bool,
     node_time: Optional[Union[Tensor, Dict[str, Tensor]]] = None,
     neg_sampling: Optional[NegativeSampling] = None,
-    distributed: bool = False,
 ) -> Union[SamplerOutput, HeteroSamplerOutput]:
     r"""Performs sampling from an edge sampler input, leveraging a sampling
     function of the same signature as `node_sample`."""
@@ -654,13 +653,7 @@ def edge_sample(
         if edge_label_time is not None:  # Always disjoint.
             seed_time = torch.cat([src_time, dst_time])
 
-        if distributed:
-            out = asyncio.run(
-                sample_fn(
-                    NodeSamplerInput(inputs.input_id, seed, seed_time,
-                                     input_type=None)))
-        else:
-            out = sample_fn(seed, seed_time)
+        out = sample_fn(seed, seed_time)
 
         # Enhance `out` by label information ##################################
         if neg_sampling is None or neg_sampling.is_binary():

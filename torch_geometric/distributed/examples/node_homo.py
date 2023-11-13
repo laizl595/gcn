@@ -10,7 +10,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 import torch_geometric.distributed as pyg_dist
 from torch_geometric.distributed import LocalFeatureStore, LocalGraphStore
-from torch_geometric.distributed.dist_context import DistContext, DistRole
+from torch_geometric.distributed.dist_context import DistContext
 from torch_geometric.distributed.partition import load_partition_info
 from torch_geometric.nn import GraphSAGE
 from torch_geometric.typing import Tuple
@@ -193,14 +193,16 @@ def run_training_proc(
             if i == len(train_loader) - 1:
                 print(" ---- dist.barrier ----")
                 torch.distributed.barrier()
-            print(
-                f"-------- dist_train_2nodes: i={i} batch_time={time.time() - batch_time_start} --------- "
-            )
+            if i == 100:
+                break
+            # print(
+            #     f"-------- dist_train_2nodes: i={i} batch_time={time.time() - batch_time_start} --------- "
+            # )
         print(" ---- dist.barrier ----")
         end = time.time()
-        f.write(
-            f"-- [Trainer {current_ctx.rank}] Epoch: {epoch:03d}, Loss: {loss:.4f}, Epoch Time: {end - start}\n"
-        )
+        # f.write(
+        #     f"-- [Trainer {current_ctx.rank}] Epoch: {epoch:03d}, Loss: {loss:.4f}, Epoch Time: {end - start}\n"
+        # )
         print(
             f"-- [Trainer {current_ctx.rank}] Epoch: {epoch:03d}, Loss: {loss:.4f}, Epoch Time: {end - start}\n"
         )
@@ -210,21 +212,21 @@ def run_training_proc(
         )
         print("\n\n\n\n\n\n")
 
-        # Test accuracy.
-        if epoch % 5 == 0:  # or epoch > (epochs // 2):
-            test_acc = test(model, test_loader, dataset_name)
-            f.write(
-                f"-- [Trainer {current_ctx.rank}] Epoch: {epoch:03d} Test Accuracy: {test_acc:.4f}\n"
-            )
-            print(
-                f"-- [Trainer {current_ctx.rank}] Epoch: {epoch:03d} Test Accuracy: {test_acc:.4f}\n"
-            )
+        # # Test accuracy.
+        # if epoch % 5 == 0:  # or epoch > (epochs // 2):
+        #     test_acc = test(model, test_loader, dataset_name)
+        #     f.write(
+        #         f"-- [Trainer {current_ctx.rank}] Epoch: {epoch:03d} Test Accuracy: {test_acc:.4f}\n"
+        #     )
+        #     print(
+        #         f"-- [Trainer {current_ctx.rank}] Epoch: {epoch:03d} Test Accuracy: {test_acc:.4f}\n"
+        #     )
 
-            print("\n\n\n\n\n\n")
-            print(
-                "********************************************************************************************** "
-            )
-        print("\n\n\n\n\n\n")
+        #     print("\n\n\n\n\n\n")
+        #     print(
+        #         "********************************************************************************************** "
+        #     )
+        # print("\n\n\n\n\n\n")
 
     print(f"----------- 555 ------------- ")
 

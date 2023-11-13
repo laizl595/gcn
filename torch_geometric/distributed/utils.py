@@ -38,11 +38,16 @@ class BatchDict:
        output
     3) The output subgraph IDs without duplicates
     """
-    def __init__(self, node_types):
-        self.src: Dict[NodeType, Tensor] = Dict.fromkeys(node_types, None)
-        self.with_dupl: Dict[NodeType,
-                             Tensor] = Dict.fromkeys(node_types, None)
-        self.out: Dict[NodeType, Tensor] = Dict.fromkeys(node_types, None)
+    def __init__(self, node_types, num_hops):
+        self.src: Dict[NodeType, List[Tensor]] = defaultdict(list)
+        self.with_dupl: Dict[NodeType, Tensor] = defaultdict()
+        self.out: Dict[NodeType, Tensor] = defaultdict()
+
+        for k in node_types:
+            self.src.update(
+                {k: (num_hops + 1) * [torch.empty(0, dtype=torch.int64)]})
+            self.with_dupl.update({k: torch.empty(0, dtype=torch.int64)})
+            self.out.update({k: torch.empty(0, dtype=torch.int64)})
 
 
 def remove_duplicates(

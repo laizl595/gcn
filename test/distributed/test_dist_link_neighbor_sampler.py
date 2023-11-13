@@ -15,9 +15,8 @@ from torch_geometric.distributed.rpc import init_rpc
 from torch_geometric.sampler import (
     EdgeSamplerInput,
     NeighborSampler,
-    edge_sample,
 )
-from torch_geometric.sampler.neighbor_sampler import node_sample
+from torch_geometric.sampler.neighbor_sampler import edge_sample
 from torch_geometric.testing import withPackage
 
 
@@ -134,16 +133,9 @@ def dist_link_neighbor_sampler(
     )
 
     # evaluate distributed edge sample function
-    # out_dist = edge_sample(
-    #     inputs,
-    #     dist_sampler.node_sample,
-    #     data.num_nodes,
-    #     disjoint,
-    #     node_time=None,
-    #     neg_sampling=None,
-    #     distributed=True,
-    # )
-    out_dist = dist_sampler.sample_from_edges(inputs, None)
+    out_dist = dist_sampler.event_loop.run_task(
+        coro=dist_sampler.edge_sample(inputs, dist_sampler.node_sample,
+                                      data.num_nodes, disjoint))
 
     torch.distributed.barrier()
 
@@ -158,7 +150,6 @@ def dist_link_neighbor_sampler(
         disjoint,
         node_time=None,
         neg_sampling=None,
-        distributed=False,
     )
 
     # compare distributed output with single machine output
@@ -241,15 +232,10 @@ def dist_link_neighbor_sampler_temporal(
     )
 
     # evaluate distributed edge sample function
-    out_dist = edge_sample(
-        inputs,
-        dist_sampler.node_sample,
-        data.num_nodes,
-        disjoint=True,
-        node_time=seed_time,
-        neg_sampling=None,
-        distributed=True,
-    )
+    out_dist = dist_sampler.event_loop.run_task(
+        coro=dist_sampler.edge_sample(inputs, dist_sampler.node_sample,
+                                      data.num_nodes, disjoint=True,
+                                      node_time=seed_time, neg_sampling=None))
 
     torch.distributed.barrier()
 
@@ -266,7 +252,6 @@ def dist_link_neighbor_sampler_temporal(
         disjoint=True,
         node_time=seed_time,
         neg_sampling=None,
-        distributed=False,
     )
 
     torch.distributed.barrier()

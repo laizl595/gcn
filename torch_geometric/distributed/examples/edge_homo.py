@@ -140,7 +140,7 @@ def run_training_proc(
     )
     num_workers = 4
     concurrency = 4
-    async_sampling = True
+    async_sampling = False
     train_loader = pyg_dist.DistLinkNeighborLoader(
         data=partition_data,
         num_workers=num_workers,
