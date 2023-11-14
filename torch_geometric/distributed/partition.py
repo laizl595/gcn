@@ -7,8 +7,10 @@ from typing import List, Optional, Union
 import torch
 
 from torch_geometric.data import Data, HeteroData
-from torch_geometric.loader import ClusterData
-from torch_geometric.typing import EdgeType, EdgeTypeStr, NodeType, Tuple, Dict, as_str
+from torch_geometric.distributed.utils import as_str
+from torch_geometric.loader.cluster import ClusterData
+from torch_geometric.typing import Dict, EdgeType, EdgeTypeStr, NodeType, Tuple
+from torch_geometric.utils import index_sort
 
 from torch_geometric.utils import index_sort
 
@@ -16,6 +18,7 @@ class Partitioner:
     r"""Partition the graph structure and its features of a
     :class:`~torch_geometric.data.Data` or
     :class:`~torch_geometric.data.HeteroData` object.
+
     Partitioned data output will be structured like this:
 
     **Homogeneous graphs:**
@@ -101,7 +104,7 @@ class Partitioner:
             'is_hetero': self.is_hetero,
             'node_types': self.node_types,
             'edge_types': self.edge_types,
-            'is_sorted': True, # on col / dst node
+            'is_sorted': True,  # Based on col/destination.
         }
         with open(osp.join(self.root, 'META.json'), 'w') as f:
             json.dump(meta, f)
@@ -164,12 +167,16 @@ class Partitioner:
                     global_row = node_id[rows]
                     global_col = node_perm[col]
 
-                    # Sort on col to avoid additional perm in neighbor_sampler when converting to CSC format
+                    # Sort on col to avoid keeping track of permuations in
+                    # NeighborSampler when converting to CSC format:
                     num_cols = col.size()[0]
-                    global_col, perm = index_sort(global_col, max_value=num_cols)
+                    global_col, perm = index_sort(global_col,
+                                                  max_value=num_cols)
                     global_row = global_row[perm]
                     eid = edge_id[mask][perm]
-                    assert torch.equal(data.edge_index[:, eid], torch.stack((global_row, global_col), dim=0))
+                    assert torch.equal(
+                        data.edge_index[:, eid],
+                        torch.stack((global_row, global_col), dim=0))
 
                     graph[edge_type] = {
                         'edge_id': eid,
@@ -177,15 +184,15 @@ class Partitioner:
                         'col': global_col,
                         'size': size,
                     }
-                    
+
                     if 'edge_attr' in part_data:
                         edge_attr = part_data.edge_attr[mask][perm]
-                        assert torch.equal(data.edge_attr[eid,:], edge_attr)
+                        assert torch.equal(data.edge_attr[eid, :], edge_attr)
                         efeat[edge_type] = {
                             'global_id': eid,
                             'feats': dict(edge_attr=edge_attr),
                         }
-                        
+
                 torch.save(efeat, osp.join(path, 'edge_feats.pt'))
                 torch.save(graph, osp.join(path, 'graph.pt'))
 
@@ -228,26 +235,30 @@ class Partitioner:
                 edge_id = edge_perm[edge_start:edge_start + num_edges]
                 edge_map[edge_id] = pid
                 edge_start += num_edges
-                
-                node_id = node_perm[start:end] # global node_ids
-                node_map[node_id] = pid # 0 or 1
-                
+
+                node_id = node_perm[start:end]  # global node_ids
+                node_map[node_id] = pid  # 0 or 1
+
                 rows = part_data.edge_index[0]
                 col = part_data.edge_index[1]
                 num_cols = col.size()[0]
-                    
-                global_row = node_id[rows] # part_ids -> global
+
+                global_row = node_id[rows]  # part_ids -> global
                 global_col = node_perm[col]
-                
-                # Sort on col to avoid additional perm in neighbor_sampler when converting to CSC format
+
+                # Sort on col to avoid keeping track of permuations in
+                # NeighborSampler when converting to CSC format:
                 global_col, perm = index_sort(global_col, max_value=num_cols)
-                global_row = global_row[perm]        
+                global_row = global_row[perm]
                 edge_id = edge_id[perm]
-                edge_attr = part_data.edge_attr[perm]
-                
-                assert torch.equal(self.data.edge_index[:, edge_id], torch.stack((global_row, global_col)))
-                assert torch.equal(self.data.edge_attr[edge_id,:], edge_attr)
-                
+
+                assert torch.equal(self.data.edge_index[:, edge_id],
+                                   torch.stack((global_row, global_col)))
+                if 'edge_attr' in part_data:
+                    edge_attr = part_data.edge_attr[perm]
+                    assert torch.equal(self.data.edge_attr[edge_id, :],
+                                       edge_attr)
+
                 torch.save(
                     {
                         'edge_id': edge_id,
@@ -287,7 +298,7 @@ def load_partition_info(
     partition_dir = os.path.join(root_dir, f'part_{partition_idx}')
     assert os.path.exists(partition_dir)
 
-    if meta['is_hetero'] == False:
+    if meta['is_hetero'] is False:
         node_pb = torch.load(os.path.join(root_dir, 'node_map.pt'))
         edge_pb = torch.load(os.path.join(root_dir, 'edge_map.pt'))
 

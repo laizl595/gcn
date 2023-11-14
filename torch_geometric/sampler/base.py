@@ -227,7 +227,8 @@ class SamplerOutput(CastMixin):
 
     def to_bidirectional(self) -> 'SamplerOutput':
         r"""Converts the sampled subgraph into a bidirectional variant, in
-        which all sampled edges are guaranteed to be bidirectional."""
+        which all sampled edges are guaranteed to be bidirectional.
+        """
         out = copy.copy(self)
 
         out.row, out.col, out.edge = to_bidirectional(
@@ -291,7 +292,8 @@ class HeteroSamplerOutput(CastMixin):
 
     def to_bidirectional(self) -> 'SamplerOutput':
         r"""Converts the sampled subgraph into a bidirectional variant, in
-        which all sampled edges are guaranteed to be bidirectional."""
+        which all sampled edges are guaranteed to be bidirectional.
+        """
         out = copy.copy(self)
         out.row = copy.copy(self.row)
         out.col = copy.copy(self.col)
@@ -597,6 +599,7 @@ class BaseSampler(ABC):
 
         Args:
             index (NodeSamplerInput): The node sampler input object.
+            **kwargs (optional): Additional keyword arguments.
         """
         raise NotImplementedError
 
@@ -630,5 +633,6 @@ class BaseSampler(ABC):
         tensor that defines the permutation from the edges in the original
         graph and the edges used in the sampler. If no such permutation was
         applied, :obj:`None` is returned. For heterogeneous graphs, the
-        expected return type is a permutation tensor for each edge type."""
+        expected return type is a permutation tensor for each edge type.
+        """
         return None

@@ -263,19 +263,22 @@ class LinkLoader(torch.utils.data.DataLoader, AffinityMixin):
 
         elif isinstance(out, HeteroSamplerOutput):
             if isinstance(self.data, HeteroData):
-                data = filter_hetero_data(self.data, out.node, out.row,
-                                          out.col, out.edge,
-                                          self.link_sampler.edge_permutation)
-            else:  #Tuple[FeatureStore, GraphStore]
-                if not isinstance(self.link_sampler,
-                                  BaseSampler):  #DistSampler
-                    data = filter_dist_store(*self.data, out.node, out.row,
-                                             out.col, out.edge,
-                                             self.custom_cls, out.metadata)
+                data = filter_hetero_data(  #
+                    self.data, out.node, out.row, out.col, out.edge,
+                    self.link_sampler.edge_permutation)
+
+            else:  # Tuple[FeatureStore, GraphStore]
+                # Hack to detect whether we are in a distributed setting.
+                if (self.link_sampler.__class__.__name__ ==
+                        'DistNeighborSampler'):
+                    import torch_geometric.distributed as dist
+                    data = dist.utils.filter_dist_store(
+                        *self.data, out.node, out.row, out.col, out.edge,
+                        self.custom_cls, out.metadata)
                 else:
-                    data = filter_custom_store(*self.data, out.node, out.row,
-                                               out.col, out.edge,
-                                               self.custom_cls)
+                    data = filter_custom_store(  #
+                        *self.data, out.node, out.row, out.col, out.edge,
+                        self.custom_cls)
 
             for key, node in out.node.items():
                 if 'n_id' not in data[key]:
@@ -285,11 +288,9 @@ class LinkLoader(torch.utils.data.DataLoader, AffinityMixin):
                 if edge is not None and 'e_id' not in data[key]:
                     edge = edge.to(torch.long)
                     perm = self.link_sampler.edge_permutation
-                    try:
-                        data[key].e_id = perm[key][edge] 
-                    except TypeError:
-                        data[key].e_id = edge
-
+                    if perm is not None and perm.get(key, None) is not None:
+                        edge = perm[key][edge]
+                    data[key].e_id = edge
 
             data.set_value_dict('batch', out.batch)
             data.set_value_dict('num_sampled_nodes', out.num_sampled_nodes)
