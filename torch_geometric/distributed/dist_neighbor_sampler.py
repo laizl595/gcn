@@ -1,5 +1,6 @@
 import itertools
 import logging
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -163,8 +164,7 @@ class DistNeighborSampler:
 
     async def node_sample(
         self,
-        inputs: Union[NodeSamplerInput, EdgeSamplerInput],
-        dst_time: Tensor = None,
+        inputs: NodeSamplerInput,
     ) -> Union[SamplerOutput, HeteroSamplerOutput]:
         r"""Performs layer by layer distributed sampling from a
         :class:`NodeSamplerInput` and returns the output of the sampling
@@ -178,38 +178,17 @@ class DistNeighborSampler:
         self.input_type = input_type
         batch_size = inputs.node.size()[0]
 
-        seed_dict = None
-        seed_time_dict = None
-        src_batch_dict = None
-
-        if isinstance(inputs, NodeSamplerInput):
-            seed = inputs.node.to(self.device)
-            seed_time = None
-            if self.time_attr is not None:
-                if inputs.time is not None:
-                    seed_time = inputs.time.to(self.device)
-                else:
-                    seed_time = self.node_time[seed]
-            src_batch = torch.arange(batch_size) if self.disjoint else None
-            metadata = (seed, seed_time)
-
-        elif isinstance(inputs, EdgeSamplerInput) and self.is_hetero:
-            seed_dict = {input_type[0]: inputs.row, input_type[-1]: inputs.col}
-            if dst_time is not None:
-                seed_time_dict = {
-                    input_type[0]: inputs.time,
-                    input_type[-1]: dst_time,
-                }
-
-            if self.disjoint:
-                src_batch_dict = {
-                    input_type[0]: torch.arange(batch_size),
-                    input_type[-1]: torch.arange(batch_size, batch_size * 2),
-                }
-            metadata = (seed_dict, seed_time_dict)
-
-        else:
-            raise NotImplementedError
+        seed = inputs.node.to(self.device)
+        seed_time = None
+        if self.time_attr is not None:
+            if inputs.time is not None:
+                seed_time = inputs.time.to(self.device)
+            else:
+                seed_time = self.node_time[
+                    seed] if not self.is_hetero else self.node_time[
+                        input_type][seed]
+        src_batch = torch.arange(batch_size) if self.disjoint else None
+        metadata = (seed, seed_time)
 
         if self.is_hetero:
             if input_type is None:
@@ -218,88 +197,77 @@ class DistNeighborSampler:
             seed_dict: Dict[NodeType, Tensor] = {input_type: seed}
             seed_time_dict: Dict[NodeType, Tensor] = {input_type: seed_time}
 
-            node_dict = NodeDict()
-            batch_dict = BatchDict(self.disjoint)
-            edge_dict: Dict[EdgeType, Tensor] = {}
-            num_sampled_nodes_dict: Dict[NodeType, List[int]] = {}
-            sampled_nbrs_per_node_dict: Dict[EdgeType, List[int]] = {}
-            num_sampled_edges_dict: Dict[EdgeType, List[int]] = {}
+            node_dict = NodeDict(self.node_types, self.num_hops)
+            batch_dict = BatchDict(self.node_types, self.num_hops)
 
-            for ntype in self._sampler.node_types:
-                num_sampled_nodes_dict.update({ntype: [0]})
+            edge_dict: Dict[EdgeType, Tensor] = defaultdict()
+            edge_dict.update((k, torch.empty(0, dtype=torch.int64))
+                             for k in self.edge_types)
 
-            for etype in self._sampler.edge_types:
-                edge_dict.update({etype: torch.empty(0, dtype=torch.int64)})
-                num_sampled_edges_dict.update({etype: []})
-                sampled_nbrs_per_node_dict.update({etype: []})
+            sampled_nbrs_per_node_dict: Dict[EdgeType,
+                                             List[List]] = defaultdict(list)
+            sampled_nbrs_per_node_dict.update(
+                (k, [[] for _ in range(self.num_hops)])
+                for k in self.edge_types)
 
-            if isinstance(inputs, EdgeSamplerInput):
-                node_dict.src = seed_dict
-                node_dict.out = {
-                    input_type[0]: inputs.row.numpy(),
-                    input_type[-1]: inputs.col.numpy(),
-                }
+            num_sampled_edges_dict: Dict[EdgeType,
+                                         List[int]] = defaultdict(list)
+            num_sampled_edges_dict.update((k, []) for k in self.edge_types)
 
-                num_sampled_nodes_dict = {
-                    input_type[0]: [inputs.row.numel()],
-                    input_type[-1]: [inputs.col.numel()],
-                }
+            num_sampled_nodes_dict: Dict[NodeType,
+                                         List[int]] = defaultdict(list)
+            num_sampled_nodes_dict.update((k, [0]) for k in self.node_types)
 
-                if self.disjoint:
-                    batch_dict = src_batch_dict
-                    batch_dict.out = {
-                        input_type[0]: src_batch_dict[input_type[0]].numpy(),
-                        input_type[-1]: src_batch_dict[input_type[-1]].numpy(),
-                    }
+            node_dict.src[input_type][0] = seed
+            node_dict.out[input_type] = seed
 
-            else:
-                node_dict.src[input_type] = seed
-                node_dict.out[input_type] = seed.numpy()
+            num_sampled_nodes_dict[input_type][0] = len(seed)
 
-                num_sampled_nodes_dict[input_type].append(seed.numel())
-
-                if self.disjoint:
-                    batch_dict.src[input_type] = src_batch
-                    batch_dict.out[input_type] = src_batch.numpy()
+            if self.disjoint:
+                batch_dict.src[input_type][0] = src_batch
+                batch_dict.out[input_type] = src_batch
 
             # loop over the layers
-            for i in range(self._sampler.num_hops):
-                # create tasks
-                task_dict = {}
-                for etype in self._sampler.edge_types:
-                    src = etype[0] if not self.csc else etype[2]
+            for i in range(self.num_hops):
+                # sample neighbors per edge type
+                for edge_type in self.edge_types:
+                    src = edge_type[0] if not self.csc else edge_type[2]
 
-                    if node_dict.src[src].numel():
-                        seed_time = (seed_time_dict.get(src, None)
-                                     if seed_time_dict is not None else None)
-                        if isinstance(self.num_neighbors, list):
-                            one_hop_num = self.num_neighbors[i]
-                        else:
-                            one_hop_num = self.num_neighbors[etype][i]
+                    if node_dict.src[src][i].numel() == 0:
+                        # there are no src nodes of this type in the
+                        # current layer
+                        num_sampled_edges_dict[edge_type].append(0)
+                        continue
 
-                        task_dict[etype] = self.event_loop._loop.create_task(
-                            self.sample_one_hop(
-                                node_dict.src[src],
-                                one_hop_num,
-                                seed_time,
-                                batch_dict.src[src],
-                                etype,
-                            ))
+                    seed_time = (seed_time_dict.get(src, None)
+                                 if seed_time_dict is not None else None)
 
-                for etype, task in task_dict.items():
-                    out: HeteroSamplerOutput = await task
+                    if isinstance(self.num_neighbors, list):
+                        one_hop_num = self.num_neighbors[i]
+                    else:
+                        one_hop_num = self.num_neighbors[edge_type][i]
+
+                    # sample neighbors
+                    out = await self.sample_one_hop(
+                        node_dict.src[src][i],
+                        one_hop_num,
+                        seed_time,
+                        batch_dict.src[src][i],
+                        edge_type,
+                    )
 
                     if out.node.numel() == 0:
                         # no neighbors were sampled
-                        break
+                        num_sampled_edges_dict[edge_type].append(0)
+                        continue
 
-                    dst = etype[2] if not self.csc else etype[0]
+                    dst = edge_type[2] if not self.csc else edge_type[0]
 
                     # remove duplicates
                     (
-                        node_dict.src[dst],
+                        node_src,
                         node_dict.out[dst],
-                        batch_dict.src[dst],
+                        batch_src,
                         batch_dict.out[dst],
                     ) = remove_duplicates(
                         out,
@@ -308,24 +276,43 @@ class DistNeighborSampler:
                         self.disjoint,
                     )
 
+                    # create src nodes for the next layer
+                    node_dict.src[dst][i + 1] = torch.cat(
+                        [node_dict.src[dst][i + 1], node_src])
+                    if self.disjoint:
+                        batch_dict.src[dst][i + 1] = torch.cat(
+                            [batch_dict.src[dst][i + 1], batch_src])
+
+                    # save sampled nodes with duplicates to be able to create
+                    # local edge indices
                     node_dict.with_dupl[dst] = torch.cat(
-                        [node_dict.with_dupl[dst], out.node])
-                    edge_dict[etype] = torch.cat([edge_dict[etype], out.edge])
+                        [node_dict.with_dupl[dst], out.node])  # append??
+                    edge_dict[edge_type] = torch.cat(
+                        [edge_dict[edge_type], out.edge])  # append
 
                     if self.disjoint:
                         batch_dict.with_dupl[dst] = torch.cat(
                             [batch_dict.with_dupl[dst], out.batch])
 
-                    num_sampled_nodes_dict[dst].append(len(node_dict.src[dst]))
-                    num_sampled_edges_dict[etype].append(len(out.node))
-                    sampled_nbrs_per_node_dict[etype] += out.metadata
+                    # collect sampled neighbors per node separately
+                    # for each layer
+                    sampled_nbrs_per_node_dict[edge_type][i] += out.metadata[0]
+
+                    num_sampled_edges_dict[edge_type].append(len(out.node))
+
+                for node_type in self.node_types:
+                    num_sampled_nodes_dict[node_type].append(
+                        len(node_dict.src[node_type][i + 1]))
 
             sampled_nbrs_per_node_dict = remap_keys(sampled_nbrs_per_node_dict,
                                                     self._sampler.to_rel_type)
 
+            print("seed=")
+            print(metadata[0])
+            # create local edge indices for a batch
             row_dict, col_dict = torch.ops.pyg.hetero_relabel_neighborhood(
-                self._sampler.node_types,
-                self._sampler.edge_types,
+                self.node_types,
+                self.edge_types,
                 seed_dict,
                 node_dict.with_dupl,
                 sampled_nbrs_per_node_dict,
@@ -334,16 +321,6 @@ class DistNeighborSampler:
                 self.csc,
                 self.disjoint,
             )
-
-            node_dict.out = {
-                ntype: torch.from_numpy(node_dict.out[ntype])
-                for ntype in self._sampler.node_types
-            }
-            if self.disjoint:
-                batch_dict.out = {
-                    ntype: torch.from_numpy(batch_dict.out[ntype])
-                    for ntype in self._sampler.node_types
-                }
 
             sampler_output = HeteroSamplerOutput(
                 node=node_dict.out,
@@ -716,6 +693,9 @@ class DistNeighborSampler:
                 efeats = None
 
         output.metadata = (*output.metadata, nfeats, nlabels, efeats)
+        # if self.is_hetero: # check if this is needed
+        #     output.row = remap_keys(output.row, self._sampler.to_edge_type)
+        #     output.col = remap_keys(output.col, self._sampler.to_edge_type)
         return output
 
     @property
