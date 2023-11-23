@@ -28,7 +28,6 @@ from torch_geometric.distributed.utils import (
     remove_duplicates,
 )
 from torch_geometric.sampler import (
-    EdgeSamplerInput,
     HeteroSamplerOutput,
     NeighborSampler,
     NodeSamplerInput,
@@ -227,15 +226,15 @@ class DistNeighborSampler:
                 batch_dict.src[input_type][0] = src_batch
                 batch_dict.out[input_type] = src_batch
 
-            # loop over the layers
+            # Loop over the layers:
             for i in range(self.num_hops):
-                # sample neighbors per edge type
+                # Sample neighbors per edge type.
                 for edge_type in self.edge_types:
                     src = edge_type[0] if not self.csc else edge_type[2]
 
                     if node_dict.src[src][i].numel() == 0:
-                        # there are no src nodes of this type in the
-                        # current layer
+                        # There are no src nodes of this type in the
+                        # current layer.
                         num_sampled_edges_dict[edge_type].append(0)
                         continue
 
@@ -247,7 +246,7 @@ class DistNeighborSampler:
                     else:
                         one_hop_num = self.num_neighbors[edge_type][i]
 
-                    # sample neighbors
+                    # Sample neighbors:
                     out = await self.sample_one_hop(
                         node_dict.src[src][i],
                         one_hop_num,
@@ -257,13 +256,13 @@ class DistNeighborSampler:
                     )
 
                     if out.node.numel() == 0:
-                        # no neighbors were sampled
+                        # No neighbors were sampled.
                         num_sampled_edges_dict[edge_type].append(0)
                         continue
 
                     dst = edge_type[2] if not self.csc else edge_type[0]
 
-                    # remove duplicates
+                    # Remove duplicates:
                     (
                         node_src,
                         node_dict.out[dst],
@@ -276,26 +275,26 @@ class DistNeighborSampler:
                         self.disjoint,
                     )
 
-                    # create src nodes for the next layer
+                    # Create src nodes for the next layer:
                     node_dict.src[dst][i + 1] = torch.cat(
                         [node_dict.src[dst][i + 1], node_src])
                     if self.disjoint:
                         batch_dict.src[dst][i + 1] = torch.cat(
                             [batch_dict.src[dst][i + 1], batch_src])
 
-                    # save sampled nodes with duplicates to be able to create
-                    # local edge indices
+                    # Save sampled nodes with duplicates to be able to create
+                    # local edge indices:
                     node_dict.with_dupl[dst] = torch.cat(
-                        [node_dict.with_dupl[dst], out.node])  # append??
+                        [node_dict.with_dupl[dst], out.node])
                     edge_dict[edge_type] = torch.cat(
-                        [edge_dict[edge_type], out.edge])  # append
+                        [edge_dict[edge_type], out.edge])
 
                     if self.disjoint:
                         batch_dict.with_dupl[dst] = torch.cat(
                             [batch_dict.with_dupl[dst], out.batch])
 
-                    # collect sampled neighbors per node separately
-                    # for each layer
+                    # Collect sampled neighbors per node separately
+                    # for each layer:
                     sampled_nbrs_per_node_dict[edge_type][i] += out.metadata[0]
 
                     num_sampled_edges_dict[edge_type].append(len(out.node))
@@ -307,9 +306,7 @@ class DistNeighborSampler:
             sampled_nbrs_per_node_dict = remap_keys(sampled_nbrs_per_node_dict,
                                                     self._sampler.to_rel_type)
 
-            print("seed=")
-            print(metadata[0])
-            # create local edge indices for a batch
+            # Create local edge indices for a batch:
             row_dict, col_dict = torch.ops.pyg.hetero_relabel_neighborhood(
                 self.node_types,
                 self.edge_types,
@@ -345,15 +342,15 @@ class DistNeighborSampler:
             num_sampled_nodes = [seed.numel()]
             num_sampled_edges = []
 
-            # loop over the layers
+            # Loop over the layers
             for i, one_hop_num in enumerate(self.num_neighbors):
                 out = await self.sample_one_hop(src, one_hop_num, seed_time,
                                                 src_batch)
                 if out.node.numel() == 0:
-                    # no neighbors were sampled
+                    # No neighbors were sampled
                     break
 
-                # remove duplicates
+                # Remove duplicates
                 src, node, src_batch, batch = remove_duplicates(
                     out, node, batch, self.disjoint)
 
