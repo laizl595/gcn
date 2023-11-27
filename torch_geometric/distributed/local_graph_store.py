@@ -158,11 +158,15 @@ class LocalGraphStore(GraphStore):
             )
             edge_id = edge_id_dict[edge_type]
             if not is_sorted:
+                print("before:")
+                print(edge_index)
                 edge_index, edge_id = sort_edge_index(
                     edge_index,
                     edge_id,
                     sort_by_row=False,
                 )
+                print("after:")
+                print(edge_index)
             graph_store.put_edge_index(edge_index, **attr)
             graph_store.put_edge_id(edge_id, **attr)
         return graph_store

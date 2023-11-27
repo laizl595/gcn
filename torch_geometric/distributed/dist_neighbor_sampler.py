@@ -286,6 +286,10 @@ class DistNeighborSampler:
                     # local edge indices:
                     node_dict.with_dupl[dst] = torch.cat(
                         [node_dict.with_dupl[dst], out.node])
+
+                    print(f'dst={dst}')
+                    print(f'node_dict.with_dupl[dst]={node_dict.with_dupl[dst]}')
+
                     edge_dict[edge_type] = torch.cat(
                         [edge_dict[edge_type], out.edge])
 
@@ -514,7 +518,7 @@ class DistNeighborSampler:
 
         Returns merged samplers outputs from local / remote machines.
         """
-        partition_ids = self.graph_store.get_partition_ids_from_nids(srcs)
+        partition_ids = self.graph_store.get_partition_ids_from_nids(srcs, edge_type[2])
         partition_orders = torch.zeros(len(partition_ids), dtype=torch.long)
 
         p_outputs: List[SamplerOutput] = [
@@ -592,6 +596,8 @@ class DistNeighborSampler:
             row = self._sampler.row_dict[rel_type]
             node_time = self.node_time.get(edge_type[2],
                                            None) if self.node_time else None
+        print("edge_type:")
+        print(edge_type)
 
         out = torch.ops.pyg.dist_neighbor_sample(
             colptr,

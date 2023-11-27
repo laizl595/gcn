@@ -4,72 +4,164 @@ import socket
 import pytest
 import torch
 
-from torch_geometric.data import HeteroData
-from torch_geometric.datasets import FakeHeteroDataset
-from torch_geometric.distributed import (
-    LocalFeatureStore,
-    LocalGraphStore,
-    Partitioner,
-)
+from torch_geometric.data import Data, HeteroData
+from torch_geometric.distributed import LocalFeatureStore, LocalGraphStore
 from torch_geometric.distributed.dist_context import DistContext
 from torch_geometric.distributed.dist_neighbor_sampler import (
     DistNeighborSampler,
     close_sampler,
 )
-from torch_geometric.distributed.partition import load_partition_info
 from torch_geometric.distributed.rpc import init_rpc
 from torch_geometric.sampler import NeighborSampler, NodeSamplerInput
 from torch_geometric.sampler.neighbor_sampler import node_sample
 from torch_geometric.testing import withPackage
 
 
-def create_hetero_data(tmp_path: str, rank: int):
-    graph_store = LocalGraphStore.from_partition(tmp_path, pid=rank)
-    feat_store = LocalFeatureStore.from_partition(tmp_path, pid=rank)
-    (
-        meta,
-        num_partitions,
-        partition_idx,
-        node_pb,
-        edge_pb,
-    ) = load_partition_info(tmp_path, rank)
-    graph_store.partition_idx = partition_idx
-    graph_store.num_partitions = num_partitions
-    graph_store.node_pb = node_pb
-    graph_store.edge_pb = edge_pb
-    graph_store.meta = meta
+def create_hetero_data(rank, world_size, temporal=False):
+    if rank == 0:  # Partition 0:
+        node_id_dict = {
+            'paper': torch.tensor([0, 1, 2, 4], dtype=torch.int64),
+            'author': torch.tensor([0, 1, 2], dtype=torch.int64),
+        }
+        x_dict = {'paper': None, 'author': None}
+        y_dict = {'paper': None, 'author': None}
 
-    feat_store.partition_idx = partition_idx
-    feat_store.num_partitions = num_partitions
-    feat_store.node_feat_pb = node_pb
-    feat_store.edge_feat_pb = edge_pb
-    feat_store.meta = meta
+        edge_index_dict = {  # Sorted by destination.
+            ('paper', 'to', 'paper'): torch.tensor([
+                [1, 2, 0], # paper
+                [0, 1, 4], # paper
+            ]),
+            ('paper', 'to', 'author'): torch.tensor([
+                [0], # paper
+                [1], # author
+            ]),
+            ('author', 'to', 'paper'): torch.tensor([
+                [0], # author
+                [2], # paper
+            ]),
+            ('author', 'to', 'author'): torch.tensor([
+                [1, 2], # author
+                [0, 1], # author
+            ])
+        }
+        edge_id_dict = {
+            ('paper', 'to', 'paper'): None,
+            ('paper', 'to', 'author'): None,
+            ('author', 'to', 'paper'): None,
+            ('author', 'to', 'author'): None,
+        }
+    else:  # Partition 1:
+        node_id_dict = {
+            'paper': torch.tensor([0, 3, 4], dtype=torch.int64),
+            'author': torch.tensor([1, 2, 3, 4], dtype=torch.int64),
+        }
+        x_dict = {'paper': None, 'author': None}
+        y_dict = {
+            'paper': None,
+            'author': None,
+        }
 
-    return feat_store, graph_store
+        edge_index_dict = {  # Sorted by destination.
+            ('paper', 'to', 'paper'): torch.tensor([
+                [4, 0], # paper
+                [3, 4], # paper
+            ]),
+            ('paper', 'to', 'author'): torch.tensor([
+                [3], # paper
+                [4], # author
+            ]),
+            ('author', 'to', 'paper'): torch.tensor([
+                [2], # author
+                [4], # paper
+            ]),
+            ('author', 'to', 'author'): torch.tensor([
+                [2, 3, 4], # author src
+                [1, 2, 3], # author dst
+            ])
+            # colptr = [0, 0, ]
+            
+        }
+        edge_id_dict = {
+            ('paper', 'to', 'paper'): None,
+            ('paper', 'to', 'author'): None,
+            ('author', 'to', 'paper'): None,
+            ('author', 'to', 'author'): None,
+        }
+    num_nodes_dict = {'paper': 5, 'author': 5}
+    # is_sorted_dict = {'paper': True, 'author': True}
+
+    feature_store = LocalFeatureStore.from_hetero_data(node_id_dict, x_dict,
+                                                       y_dict, edge_id_dict)
+    graph_store = LocalGraphStore.from_hetero_data(edge_id_dict,
+                                                   edge_index_dict,
+                                                   num_nodes_dict)
+
+    graph_store.node_pb = {
+            'paper': torch.tensor([0, 0, 0, 1, 1]),
+            'author': torch.tensor([0, 0, 1, 1, 1]),
+    }
+    graph_store.meta.update({'num_parts': 2})
+    graph_store.partition_idx = rank
+    graph_store.num_partitions = world_size
+
+    edge_index_dict = {  # Create reference data:
+        ('paper', 'to', 'paper'): torch.tensor([
+            [1, 2, 9, 0],
+            [0, 1, 8, 9],
+        ]),
+        ('paper', 'to', 'author'): torch.tensor([
+            [0, 8],
+            [4, 7],
+        ]),
+        ('author', 'to', 'paper'): torch.tensor([
+            [3, 5],
+            [2, 9],
+        ]),
+        ('author', 'to', 'author'): torch.tensor([
+            [4, 5, 6, 7],
+            [3, 4, 5, 6],
+        ])
+    }
+
+    data = HeteroData()
+    data['paper'].node_id = torch.tensor([0, 1, 2, 3, 4], dtype=torch.int64)
+    data['author'].node_id = torch.tensor([0, 1, 2, 3, 4], dtype=torch.int64)
+    data['paper'].x = x_dict['paper']
+    data['author'].x = x_dict['author']
+    data['paper'].y = y_dict['paper']
+    data['author'].y = y_dict['author']
+    data[('paper', 'to', 'paper')].edge_index = edge_index_dict[('paper', 'to',
+                                                                 'paper')]
+    data[('paper', 'to',
+          'author')].edge_index = edge_index_dict[('paper', 'to', 'author')]
+    data[('author', 'to',
+          'paper')].edge_index = edge_index_dict[('author', 'to', 'paper')]
+    data[('author', 'to',
+          'author')].edge_index = edge_index_dict[('author', 'to', 'author')]
+    data['paper'].num_nodes = 5
+    data['author'].num_nodes = 5
+
+    if temporal:
+        data_time_dict = {  # Create time data:
+            'paper': torch.tensor([5, 0, 1, 4, 4]),
+            'author': torch.tensor([3, 3, 4, 4, 4]),
+        }
+        feature_store.put_tensor(data_time_dict['paper'], group_name='paper', attr_name='time')
+        feature_store.put_tensor(data_time_dict['author'], group_name='author', attr_name='time')
+
+        data.time_dict = data_time_dict
+
+    return (feature_store, graph_store), data
 
 
 def dist_neighbor_sampler_hetero(
-    data: FakeHeteroDataset,
-    tmp_path: str,
     world_size: int,
     rank: int,
     master_port: int,
     input_type: str,
     disjoint: bool = False,
 ):
-    dist_data = create_hetero_data(tmp_path, rank)
-
-    print("dist hetero data:")
-    print("rank=")
-    print(rank)
-    print("'v0','e0','v1'")
-    print(dist_data[1]._edge_index[(('v0','e0','v1'), 'coo')])
-    print("'v1','e0','v1'")
-    print(dist_data[1]._edge_index[(('v1','e0','v1'), 'coo')])
-    print("'v0','e0','v0'")
-    print(dist_data[1]._edge_index[(('v0','e0','v0'), 'coo')])
-    print("'v1','e0','v0'")
-    print(dist_data[1]._edge_index[(('v1','e0','v0'), 'coo')])
+    dist_data, data = create_hetero_data(rank, world_size)
 
     current_ctx = DistContext(
         rank=rank,
@@ -111,16 +203,10 @@ def dist_neighbor_sampler_hetero(
     atexit.register(close_sampler, 0, dist_sampler)
     torch.distributed.barrier()
 
-    node_pb_list = dist_data[1].node_pb[input_type].tolist()
-    node_0 = node_pb_list.index(0)
-    node_1 = node_pb_list.index(1)
-
-    print(rank)
-    print(dist_data[1].node_pb)
     if rank == 0:  # Seed nodes:
-        input_node = torch.tensor([node_0, node_1], dtype=torch.int64)
+        input_node = torch.tensor([0, 2], dtype=torch.int64) # todo change to nodes from different partitions
     else:
-        input_node =  torch.tensor([node_1, node_0], dtype=torch.int64)
+        input_node = torch.tensor([2, 4], dtype=torch.int64) # todo change to nodes from different partitions
 
     inputs = NodeSamplerInput(
         input_id=None,
@@ -145,14 +231,14 @@ def dist_neighbor_sampler_hetero(
 
     # Compare distributed output with single machine output:
     for k in data.node_types:
-        assert torch.equal(out_dist.node[k].sort()[0], out.node[k].sort()[0])
+        assert torch.equal(out_dist.node[k], out.node[k])
         if disjoint:
-            assert torch.equal(out_dist.batch[k].sort()[0], out.batch[k].sort()[0])
+            assert torch.equal(out_dist.batch[k], out.batch[k])
         assert out_dist.num_sampled_nodes[k] == out.num_sampled_nodes[k]
 
     for k in data.edge_types:
-        # assert torch.equal(out_dist.row[k].sort()[0], out.row[k].sort()[0])
-        # assert torch.equal(out_dist.col[k].sort()[0], out.col[k].sort()[0])
+        assert torch.equal(out_dist.row[k], out.row[k])
+        assert torch.equal(out_dist.col[k], out.col[k])
         assert out_dist.num_sampled_edges[k] == out.num_sampled_edges[k]
 
     torch.distributed.barrier()
@@ -251,10 +337,7 @@ def dist_neighbor_sampler_temporal_hetero(
 
 @withPackage('pyg_lib')
 @pytest.mark.parametrize('disjoint', [False, True])
-def test_dist_neighbor_sampler_hetero(
-    tmp_path,
-    disjoint
-):
+def test_dist_neighbor_sampler_hetero(disjoint):
     mp_context = torch.multiprocessing.get_context('spawn')
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(("127.0.0.1", 0))
@@ -262,51 +345,14 @@ def test_dist_neighbor_sampler_hetero(
     s.close()
 
     world_size = 2
-    # data = FakeHeteroDataset(
-    #     num_graphs=1,
-    #     avg_num_nodes=100,
-    #     avg_degree=3,
-    #     num_node_types=2,
-    #     num_edge_types=4,
-    #     edge_dim=2,
-    # )[0]
-    data = FakeHeteroDataset(
-        num_graphs=1,
-        avg_num_nodes=10,
-        avg_degree=3,
-        num_node_types=2,
-        num_edge_types=4,
-        edge_dim=2,
-    )[0]
-
-    print("hetero edge_index:")
-    print(data.edge_items()[0][0])
-    print(data.edge_items()[0][1])
-
-    print("hetero edge_index:")
-    print(data.edge_items()[1][0])
-    print(data.edge_items()[1][1])
-
-    print("hetero edge_index:")
-    print(data.edge_items()[2][0])
-    print(data.edge_items()[2][1])
-
-    print("hetero edge_index:")
-    print(data.edge_items()[3][0])
-    print(data.edge_items()[3][1])
-
-    partitioner = Partitioner(data, world_size, tmp_path)
-    partitioner.generate_partition()
-
-    
     w0 = mp_context.Process(
         target=dist_neighbor_sampler_hetero,
-        args=(data, tmp_path, world_size, 0, port, 'v0', disjoint),
+        args=(world_size, 0, port, 'paper', disjoint),
     )
 
     w1 = mp_context.Process(
         target=dist_neighbor_sampler_hetero,
-        args=(data, tmp_path, world_size, 1, port, 'v1', disjoint),
+        args=(world_size, 1, port, 'author', disjoint),
     )
 
     w0.start()

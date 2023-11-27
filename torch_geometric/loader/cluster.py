@@ -18,8 +18,8 @@ from torch_geometric.utils.sparse import index2ptr, ptr2index
 
 @dataclass
 class Partition:
-    rowptr: Tensor
-    col: Tensor
+    colptr: Tensor
+    row: Tensor
     partptr: Tensor
     node_perm: Tensor
     edge_perm: Tensor
@@ -86,8 +86,8 @@ class ClusterData(torch.utils.data.Dataset):
         # Computes a node-level partition assignment vector via METIS.
 
         # Calculate CSR representation:
-        row, col = sort_edge_index(edge_index, num_nodes=num_nodes)
-        rowptr = index2ptr(row, size=num_nodes)
+        row, col = sort_edge_index(edge_index, num_nodes=num_nodes, sort_by_row=False)
+        colptr = index2ptr(col, size=num_nodes)
 
         # Compute METIS partitioning:
         cluster: Optional[Tensor] = None
@@ -95,8 +95,8 @@ class ClusterData(torch.utils.data.Dataset):
         if torch_geometric.typing.WITH_TORCH_SPARSE:
             try:
                 cluster = torch.ops.torch_sparse.partition(
-                    rowptr.cpu(),
-                    col.cpu(),
+                    colptr.cpu(),
+                    row.cpu(),
                     None,
                     self.num_parts,
                     self.recursive,
@@ -106,8 +106,8 @@ class ClusterData(torch.utils.data.Dataset):
 
         if cluster is None and torch_geometric.typing.WITH_METIS:
             cluster = pyg_lib.partition.metis(
-                rowptr.cpu(),
-                col.cpu(),
+                colptr.cpu(),
+                row.cpu(),
                 self.num_parts,
                 recursive=self.recursive,
             ).to(edge_index.device)
@@ -138,10 +138,11 @@ class ClusterData(torch.utils.data.Dataset):
             edge_index,
             edge_attr=edge_perm,
             num_nodes=cluster.numel(),
+            sort_by_row=False
         )
-        rowptr = index2ptr(row, size=cluster.numel())
+        colptr = index2ptr(col, size=cluster.numel())
 
-        return Partition(rowptr, col, partptr, node_perm, edge_perm)
+        return Partition(colptr, row, partptr, node_perm, edge_perm)
 
     def _permute_data(self, data: Data, partition: Partition) -> Data:
         # Permute node-level and edge-level attributes according to the
@@ -168,17 +169,17 @@ class ClusterData(torch.utils.data.Dataset):
         node_end = int(self.partition.partptr[idx + 1])
         node_length = node_end - node_start
 
-        rowptr = self.partition.rowptr[node_start:node_end + 1]
-        edge_start = int(rowptr[0])
-        edge_end = int(rowptr[-1])
+        colptr = self.partition.colptr[node_start:node_end + 1]
+        edge_start = int(colptr[0])
+        edge_end = int(colptr[-1])
         edge_length = edge_end - edge_start
-        rowptr = rowptr - edge_start
-        row = ptr2index(rowptr)
-        col = self.partition.col[edge_start:edge_end]
+        colptr = colptr - edge_start
+        col = ptr2index(colptr)
+        row = self.partition.row[edge_start:edge_end]
         if not self.keep_inter_cluster_edges:
-            edge_mask = (col >= node_start) & (col < node_end)
-            row = row[edge_mask]
-            col = col[edge_mask] - node_start
+            edge_mask = (row >= node_start) & (row < node_end)
+            col = col[edge_mask]
+            row = row[edge_mask] - node_start
 
         out = copy.copy(self.data)
 
@@ -236,39 +237,39 @@ class ClusterLoader(torch.utils.data.DataLoader):
         if not isinstance(batch, torch.Tensor):
             batch = torch.tensor(batch)
 
-        global_rowptr = self.cluster_data.partition.rowptr
-        global_col = self.cluster_data.partition.col
+        global_colptr = self.cluster_data.partition.colptr
+        global_row = self.cluster_data.partition.row
 
         # Get all node-level and edge-level start and end indices for the
         # current mini-batch:
         node_start = self.cluster_data.partition.partptr[batch]
         node_end = self.cluster_data.partition.partptr[batch + 1]
-        edge_start = global_rowptr[node_start]
-        edge_end = global_rowptr[node_end]
+        edge_start = global_colptr[node_start]
+        edge_end = global_colptr[node_end]
 
         # Iterate over each partition in the batch and calculate new edge
         # connectivity. This is done by slicing the corresponding source and
         # destination indices for each partition and adjusting their indices to
         # start from zero:
-        rows, cols, nodes, cumsum = [], [], [], 0
+        cols, rows, nodes, cumsum = [], [], [], 0
         for i in range(batch.numel()):
             nodes.append(torch.arange(node_start[i], node_end[i]))
-            rowptr = global_rowptr[node_start[i]:node_end[i] + 1]
-            rowptr = rowptr - edge_start[i]
-            row = ptr2index(rowptr) + cumsum
-            col = global_col[edge_start[i]:edge_end[i]]
-            rows.append(row)
+            colptr = global_colptr[node_start[i]:node_end[i] + 1]
+            colptr = colptr - edge_start[i]
+            col = ptr2index(colptr) + cumsum
+            row = global_row[edge_start[i]:edge_end[i]]
             cols.append(col)
-            cumsum += rowptr.numel() - 1
+            rows.append(row)
+            cumsum += colptr.numel() - 1
 
         node = torch.cat(nodes, dim=0)
-        row = torch.cat(rows, dim=0)
         col = torch.cat(cols, dim=0)
+        row = torch.cat(rows, dim=0)
 
-        # Map `col` vector to valid entries and remove any entries that do not
+        # Map `row` vector to valid entries and remove any entries that do not
         # connect two nodes within the same mini-batch:
-        col, edge_mask = map_index(col, node)
-        row = row[edge_mask]
+        row, edge_mask = map_index(row, node)
+        col = col[edge_mask]
 
         out = copy.copy(self.cluster_data.data)
 
@@ -290,6 +291,6 @@ class ClusterLoader(torch.utils.data.DataLoader):
                 ], dim=cat_dim)
                 out[key] = select(value, edge_mask, dim=cat_dim)
 
-        out.edge_index = torch.stack([row, col], dim=0)
+        out.edge_index = torch.stack([col, row], dim=0)
 
         return out
