@@ -48,7 +48,7 @@ def create_hetero_data(tmp_path: str, rank: int):
     return feat_store, graph_store
 
 
-def dist_neighbor_sampler_hetero(
+def dist_link_neighbor_sampler_hetero(
     data: FakeHeteroDataset,
     tmp_path: str,
     world_size: int,
@@ -247,7 +247,7 @@ def dist_neighbor_sampler_hetero(
 
 @withPackage('pyg_lib')
 @pytest.mark.parametrize('disjoint', [False, True])
-def test_dist_neighbor_sampler_hetero(
+def test_dist_link_neighbor_sampler_hetero(
     tmp_path,
     disjoint
 ):
@@ -288,12 +288,12 @@ def test_dist_neighbor_sampler_hetero(
 
     
     w0 = mp_context.Process(
-        target=dist_neighbor_sampler_hetero,
+        target=dist_link_neighbor_sampler_hetero,
         args=(data, tmp_path, world_size, 0, port, 'v0', disjoint),
     )
 
     w1 = mp_context.Process(
-        target=dist_neighbor_sampler_hetero,
+        target=dist_link_neighbor_sampler_hetero,
         args=(data, tmp_path, world_size, 1, port, 'v1', disjoint),
     )
 
