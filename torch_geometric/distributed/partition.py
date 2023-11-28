@@ -103,6 +103,7 @@ class Partitioner:
             recursive=self.recursive,
             log=True,
             keep_inter_cluster_edges=True,
+            sparse_format='csc',
         )
 
         node_perm = cluster_data.partition.node_perm

@@ -87,7 +87,7 @@ def dist_neighbor_sampler_hetero(
         init_method=f'tcp://localhost:{master_port}',
     )
 
-    num_neighbors = [-1, -1, -1]
+    num_neighbors = [-1, -1]
     dist_sampler = DistNeighborSampler(
         data=dist_data,
         current_ctx=current_ctx,
