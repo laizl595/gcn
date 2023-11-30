@@ -118,10 +118,8 @@ def dist_neighbor_sampler_hetero(
 
     print(rank)
     print(dist_data[1].node_pb)
-    if rank == 0:  # Seed nodes:
-        input_node = torch.tensor([node_0, node_1], dtype=torch.int64)
-    else:
-        input_node =  torch.tensor([node_1, node_0], dtype=torch.int64)
+
+    input_node = torch.tensor([node_0, node_1], dtype=torch.int64)
 
     inputs = NodeSamplerInput(
         input_id=None,

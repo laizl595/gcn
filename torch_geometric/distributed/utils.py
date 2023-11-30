@@ -9,8 +9,58 @@ from torch import Tensor
 from torch_geometric.data import HeteroData
 from torch_geometric.distributed import LocalFeatureStore, LocalGraphStore
 from torch_geometric.sampler import SamplerOutput
-from torch_geometric.typing import EdgeType, NodeType
+from torch_geometric.typing import EdgeType, EdgeTypeStr, NodeType, OptTensor
+from torch_geometric.utils.mixin import CastMixin
 
+
+@dataclass(init=False)
+class EdgeHeteroSamplerInput(CastMixin):
+    r"""The sampling input of
+    :meth:`~torch_geometric.sampler.BaseSampler.sample_from_nodes`.
+
+    Args:
+        input_id (torch.Tensor, optional): The indices of the data loader input
+            of the current mini-batch.
+        node (torch.Tensor): The indices of seed nodes to start sampling from.
+        time (torch.Tensor, optional): The timestamp for the seed nodes.
+            (default: :obj:`None`)
+        input_type (str, optional): The input node type (in case of sampling in
+            a heterogeneous graph). (default: :obj:`None`)
+    """
+    input_id: OptTensor
+    node_dict: Dict[NodeType, Tensor]
+    time_dict: Optional[Dict[NodeType, Tensor]] = None
+    input_type: Optional[NodeType] = None
+
+    def __init__(
+        self,
+        input_id: OptTensor,
+        node_dict: Dict[NodeType, Tensor],
+        time_dict: Optional[Dict[NodeType, Tensor]] = None,
+        input_type: Optional[NodeType] = None,
+    ):
+        if input_id is not None:
+            input_id = input_id.cpu()
+        node_dict = {node_type: node.cpu() for node_type, node in node_dict.items()}
+        if time_dict is not None:
+            time_dict = {node_type: time.cpu() for node_type, time in time_dict.items()}
+
+        self.input_id = input_id
+        self.node_dict = node_dict
+        self.time_dict = time_dict
+        self.input_type = input_type
+
+    # def __getitem__(self, index: Union[Tensor, Any]) -> 'NodeSamplerInput':
+    #     if not isinstance(index, Tensor):
+    #         index = torch.tensor(index, dtype=torch.long)
+
+    #     return NodeSamplerInput(
+    #         self.input_id[index] if self.input_id is not None else index,
+    #         self.node[index],
+    #         self.time[index] if self.time is not None else None,
+    #         self.input_type,
+    #     )
+    
 
 @dataclass
 class NodeDict:

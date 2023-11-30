@@ -18,13 +18,15 @@ from torch_geometric.distributed.dist_neighbor_sampler import (
 )
 from torch_geometric.distributed.partition import load_partition_info
 from torch_geometric.distributed.rpc import init_rpc
-from torch_geometric.sampler import NeighborSampler, NodeSamplerInput
-from torch_geometric.sampler.neighbor_sampler import node_sample
+from torch_geometric.sampler import NeighborSampler, EdgeSamplerInput
+from torch_geometric.sampler.neighbor_sampler import edge_sample
 from torch_geometric.testing import withPackage
 
 
 def create_hetero_data(tmp_path: str, rank: int):
     graph_store = LocalGraphStore.from_partition(tmp_path, pid=rank)
+    # Other partition graph store:
+    graph_store_other = LocalGraphStore.from_partition(tmp_path, pid=int(not rank))
     feat_store = LocalFeatureStore.from_partition(tmp_path, pid=rank)
     (
         meta,
@@ -45,7 +47,7 @@ def create_hetero_data(tmp_path: str, rank: int):
     feat_store.edge_feat_pb = edge_pb
     feat_store.meta = meta
 
-    return feat_store, graph_store
+    return (feat_store, graph_store), graph_store_other
 
 
 def dist_link_neighbor_sampler_hetero(
@@ -57,7 +59,7 @@ def dist_link_neighbor_sampler_hetero(
     input_type: str,
     disjoint: bool = False,
 ):
-    dist_data = create_hetero_data(tmp_path, rank)
+    dist_data, graph_store_other = create_hetero_data(tmp_path, rank)
 
     print("dist hetero data:")
     print("rank=")
@@ -111,27 +113,32 @@ def dist_link_neighbor_sampler_hetero(
     atexit.register(close_sampler, 0, dist_sampler)
     torch.distributed.barrier()
 
-    # Create inputs nodes such that each belongs to a different partition
-    node_pb_list = dist_data[1].node_pb[input_type].tolist()
-    node_0 = node_pb_list.index(0)
-    node_1 = node_pb_list.index(1)
+    # Create input rows and cols such that each pair belongs to a different partition
+    input_type_edge_index = dist_data[1]._edge_index[(input_type, 'coo')]
+    # Edge from the current partition:
+    row_0 = input_type_edge_index[0][0]
+    col_0 = input_type_edge_index[1][0]
+    # Edge from the other partition:
+    input_type_edge_index_other = graph_store_other._edge_index[(input_type, 'coo')]
+    row_1 = input_type_edge_index_other[0][0]
+    col_1 = input_type_edge_index_other[1][0]
 
     print(rank)
     print(dist_data[1].node_pb)
-    if rank == 0:  # Seed nodes:
-        input_node = torch.tensor([node_0, node_1], dtype=torch.int64)
-    else:
-        input_node =  torch.tensor([node_1, node_0], dtype=torch.int64)
+    # Seed nodes:
+    input_row = torch.tensor([row_0, row_1], dtype=torch.int64)
+    input_col =  torch.tensor([col_0, col_1], dtype=torch.int64)
 
-    inputs = NodeSamplerInput(
+    inputs = EdgeSamplerInput(
         input_id=None,
-        node=input_node,
+        row=input_row,
+        col=input_col,
         input_type=input_type,
     )
 
     # Evaluate distributed node sample function:
-    out_dist = dist_sampler.event_loop.run_task(
-        coro=dist_sampler.node_sample(inputs))
+    out_dist = dist_sampler.event_loop.run_task(coro=dist_sampler.edge_sample(
+        inputs, dist_sampler.node_sample, data.num_nodes, disjoint))
     
     torch.distributed.barrier()
 
@@ -141,8 +148,15 @@ def dist_link_neighbor_sampler_hetero(
         disjoint=disjoint,
     )
 
-    # Evaluate node sample function:
-    out = node_sample(inputs, sampler._sample)
+    # Evaluate edge sample function:
+    out = edge_sample(
+        inputs,
+        sampler._sample,
+        data.num_nodes,
+        disjoint,
+        node_time=None,
+        neg_sampling=None,
+    )
 
     # Compare distributed output with single machine output:
     for k in data.node_types:
@@ -246,6 +260,7 @@ def dist_link_neighbor_sampler_hetero(
 
 
 @withPackage('pyg_lib')
+# @pytest.mark.parametrize('input_type', [('v0','e0','v0'), ('v1','e0','v1'), ('v0','e0','v1'), ('v1','e0','v0')])
 @pytest.mark.parametrize('disjoint', [False, True])
 def test_dist_link_neighbor_sampler_hetero(
     tmp_path,
@@ -289,12 +304,12 @@ def test_dist_link_neighbor_sampler_hetero(
     
     w0 = mp_context.Process(
         target=dist_link_neighbor_sampler_hetero,
-        args=(data, tmp_path, world_size, 0, port, 'v0', disjoint),
+        args=(data, tmp_path, world_size, 0, port, ('v0','e0','v0'), disjoint),
     )
 
     w1 = mp_context.Process(
         target=dist_link_neighbor_sampler_hetero,
-        args=(data, tmp_path, world_size, 1, port, 'v1', disjoint),
+        args=(data, tmp_path, world_size, 1, port, ('v1','e0','v0'), disjoint),
     )
 
     w0.start()

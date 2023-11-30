@@ -246,8 +246,8 @@ class Partitioner:
                 col = part_data.edge_index[1]
                 num_cols = col.size()[0]
 
-                global_row = node_id[row]  # part_ids -> global
-                global_col = node_perm[col]
+                global_col = node_id[col]  # part_ids -> global
+                global_row = node_perm[row]
 
                 # Sort on col to avoid keeping track of permuations in
                 # NeighborSampler when converting to CSC format:
