@@ -210,11 +210,8 @@ class DistNeighborSampler:
         self.input_type = input_type
 
         if isinstance(inputs, NodeSamplerInput):
-            batch_size = inputs.node.size()[0]
             seed = inputs.node.to(self.device)
-        else:
-            batch_size = 10 # for now #TODO
-        
+
         seed_time = None
         if self.time_attr is not None:
             if inputs.time is not None:
@@ -223,7 +220,6 @@ class DistNeighborSampler:
                 seed_time = self.node_time[
                     seed] if not self.is_hetero else self.node_time[
                         input_type][seed]
-        src_batch = torch.arange(batch_size) if self.disjoint else None
 
         if self.is_hetero:
             if input_type is None:
@@ -233,8 +229,8 @@ class DistNeighborSampler:
                 seed_dict: Dict[NodeType, Tensor] = {input_type: seed}
                 seed_time_dict: Dict[NodeType, Tensor] = {input_type: seed_time}
             else:
-                seed_dict = inputs.seed_dict
-                seed_time_dict = inputs.seed_time_dict
+                seed_dict = inputs.node_dict
+                seed_time_dict = inputs.time_dict
             
             metadata = (seed_dict, seed_time_dict) # to be checked!
 
@@ -259,14 +255,18 @@ class DistNeighborSampler:
                                          List[int]] = defaultdict(list)
             num_sampled_nodes_dict.update((k, [0]) for k in self.node_types)
 
-            node_dict.src[input_type][0] = seed
-            node_dict.out[input_type] = seed
+            batch_len = 0
+            for k, v in seed_dict.items():
+                node_dict.src[k][0] = v
+                node_dict.out[k] = v
+                num_sampled_nodes_dict[k][0] = len(v)
 
-            num_sampled_nodes_dict[input_type][0] = len(seed)
+                if self.disjoint:
+                    src_batch = torch.arange(batch_len, batch_len + len(v))
+                    batch_dict.src[k][0] = src_batch
+                    batch_dict.out[k] = src_batch
 
-            if self.disjoint:
-                batch_dict.src[input_type][0] = src_batch
-                batch_dict.out[input_type] = src_batch
+                    batch_len = len(src_batch)
 
             # Loop over the layers:
             for i in range(self.num_hops):
@@ -380,7 +380,9 @@ class DistNeighborSampler:
 
             src = seed
             node = src
-            batch = src_batch if self.disjoint else None
+
+            src_batch = torch.arange(len(seed)) if self.disjoint else None
+            batch = src_batch
 
             node_with_dupl = [torch.empty(0, dtype=torch.int64)]
             batch_with_dupl = [torch.empty(0, dtype=torch.int64)]

@@ -321,16 +321,10 @@ def test_dist_link_neighbor_sampler_temporal(seed_time, temporal_strategy):
 
 @onlyLinux
 @withPackage('pyg_lib')
-@pytest.mark.skipif(
-    not WITH_EDGE_TIME_NEIGHBOR_SAMPLE,
-    reason="Edge-level temporal sampling requires a more recent 'pyg-lib'"
-    " installation")
 @pytest.mark.parametrize(
     'seed_time',
     [torch.tensor([1, 1]), torch.tensor([3, 7])])
 @pytest.mark.parametrize('temporal_strategy', ['uniform', 'last'])
-# @pytest.mark.skip(
-#     reason="Distributed edge based temporal sampling not yet implemented.")
 def test_dist_neighbor_sampler_edge_level_temporal(seed_time,
                                                    temporal_strategy):
     mp_context = torch.multiprocessing.get_context('spawn')

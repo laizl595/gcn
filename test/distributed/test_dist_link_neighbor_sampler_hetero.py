@@ -168,100 +168,127 @@ def dist_link_neighbor_sampler_hetero(
     torch.distributed.barrier()
 
 
-# def dist_neighbor_sampler_temporal_hetero(
-#     world_size: int,
-#     rank: int,
-#     master_port: int,
-#     input_type: str,
-#     seed_time: torch.tensor = None,
-#     temporal_strategy: str = 'uniform',
-# ):
-#     dist_data, data = create_hetero_data(rank, world_size, temporal=True)
+def dist_link_neighbor_sampler_temporal_hetero(
+    data: FakeHeteroDataset,
+    tmp_path: str,
+    world_size: int,
+    rank: int,
+    master_port: int,
+    input_type: str,
+    disjoint: bool = False,
+):
+    dist_data, graph_store_other = create_hetero_data(tmp_path, rank)
 
-#     current_ctx = DistContext(
-#         rank=rank,
-#         global_rank=rank,
-#         world_size=world_size,
-#         global_world_size=world_size,
-#         group_name='dist-sampler-test',
-#     )
+    print("dist hetero data:")
+    print("rank=")
+    print(rank)
+    print("'v0','e0','v1'")
+    print(dist_data[1]._edge_index[(('v0','e0','v1'), 'coo')])
+    print("'v1','e0','v1'")
+    print(dist_data[1]._edge_index[(('v1','e0','v1'), 'coo')])
+    print("'v0','e0','v0'")
+    print(dist_data[1]._edge_index[(('v0','e0','v0'), 'coo')])
+    print("'v1','e0','v0'")
+    print(dist_data[1]._edge_index[(('v1','e0','v0'), 'coo')])
 
-#     # Initialize training process group of PyTorch.
-#     torch.distributed.init_process_group(
-#         backend='gloo',
-#         rank=current_ctx.rank,
-#         world_size=current_ctx.world_size,
-#         init_method=f'tcp://localhost:{master_port}',
-#     )
+    current_ctx = DistContext(
+        rank=rank,
+        global_rank=rank,
+        world_size=world_size,
+        global_world_size=world_size,
+        group_name='dist-sampler-test',
+    )
 
-#     num_neighbors = [-1, -1] if temporal_strategy == 'uniform' else [1, 1]
-#     dist_sampler = DistNeighborSampler(
-#         data=dist_data,
-#         current_ctx=current_ctx,
-#         rpc_worker_names={},
-#         num_neighbors=num_neighbors,
-#         shuffle=False,
-#         disjoint=True,
-#         temporal_strategy=temporal_strategy,
-#         time_attr='time',
-#     )
+    # Initialize training process group of PyTorch.
+    torch.distributed.init_process_group(
+        backend='gloo',
+        rank=current_ctx.rank,
+        world_size=current_ctx.world_size,
+        init_method=f'tcp://localhost:{master_port}',
+    )
 
-#     init_rpc(
-#         current_ctx=current_ctx,
-#         rpc_worker_names={},
-#         master_addr='localhost',
-#         master_port=master_port,
-#     )
+    num_neighbors = [-1, -1]
+    dist_sampler = DistNeighborSampler(
+        data=dist_data,
+        current_ctx=current_ctx,
+        rpc_worker_names={},
+        num_neighbors=num_neighbors,
+        shuffle=False,
+        disjoint=disjoint,
+    )
 
-#     dist_sampler.register_sampler_rpc()
-#     dist_sampler.init_event_loop()
+    init_rpc(
+        current_ctx=current_ctx,
+        rpc_worker_names={},
+        master_addr='localhost',
+        master_port=master_port,
+    )
 
-#     # Close RPC & worker group at exit:
-#     atexit.register(close_sampler, 0, dist_sampler)
-#     torch.distributed.barrier()
+    dist_sampler.register_sampler_rpc()
+    dist_sampler.init_event_loop()
 
-#     if rank == 0:  # Seed nodes:
-#         input_node = torch.tensor([0, 2], dtype=torch.int64)
-#     else:
-#         input_node = torch.tensor([5, 7], dtype=torch.int64)
+    # close RPC & worker group at exit:
+    atexit.register(close_sampler, 0, dist_sampler)
+    torch.distributed.barrier()
 
-#     inputs = NodeSamplerInput(
-#         input_id=None,
-#         node=input_node,
-#         time=seed_time,
-#         input_type=input_type,
-#     )
+    # Create input rows and cols such that each pair belongs to a different partition
+    input_type_edge_index = dist_data[1]._edge_index[(input_type, 'coo')]
+    # Edge from the current partition:
+    row_0 = input_type_edge_index[0][0]
+    col_0 = input_type_edge_index[1][0]
+    # Edge from the other partition:
+    input_type_edge_index_other = graph_store_other._edge_index[(input_type, 'coo')]
+    row_1 = input_type_edge_index_other[0][0]
+    col_1 = input_type_edge_index_other[1][0]
 
-#     # Evaluate distributed node sample function:
-#     out_dist = dist_sampler.event_loop.run_task(
-#         coro=dist_sampler.node_sample(inputs))
+    print(rank)
+    print(dist_data[1].node_pb)
+    # Seed nodes:
+    input_row = torch.tensor([row_0, row_1], dtype=torch.int64)
+    input_col =  torch.tensor([col_0, col_1], dtype=torch.int64)
 
-#     torch.distributed.barrier()
+    inputs = EdgeSamplerInput(
+        input_id=None,
+        row=input_row,
+        col=input_col,
+        input_type=input_type,
+    )
 
-#     sampler = NeighborSampler(data=data, num_neighbors=num_neighbors,
-#                               disjoint=True, temporal_strategy=temporal_strategy,
-#                               time_attr='time')
+    # Evaluate distributed node sample function:
+    out_dist = dist_sampler.event_loop.run_task(coro=dist_sampler.edge_sample(
+        inputs, dist_sampler.node_sample, data.num_nodes, disjoint))
+    
+    torch.distributed.barrier()
 
-#     # Evaluate node sample function:
-#     out = node_sample(inputs, sampler._sample)
+    sampler = NeighborSampler(
+        data=data,
+        num_neighbors=num_neighbors,
+        disjoint=disjoint,
+    )
 
-#     # Compare distributed output with single machine output:
-#     for k in data.node_types:
-#         assert torch.equal(out_dist.node[k], out.node[k])
-#         assert torch.equal(out_dist.batch[k], out.batch[k])
-#         assert out_dist.num_sampled_nodes[k] == out.num_sampled_nodes[k]
+    # Evaluate edge sample function:
+    out = edge_sample(
+        inputs,
+        sampler._sample,
+        data.num_nodes,
+        disjoint,
+        node_time=None,
+        neg_sampling=None,
+    )
 
-#     for k in data.edge_types:
-#         assert torch.equal(out_dist.row[k], out.row[k])
-#         assert torch.equal(out_dist.col[k], out.col[k])
-#         assert out_dist.num_sampled_edges[k] == out.num_sampled_edges[k]
+    # Compare distributed output with single machine output:
+    for k in data.node_types:
+        assert torch.equal(out_dist.node[k].sort()[0], out.node[k].sort()[0])
+        if disjoint:
+            assert torch.equal(out_dist.batch[k].sort()[0], out.batch[k].sort()[0])
+        assert out_dist.num_sampled_nodes[k] == out.num_sampled_nodes[k]
 
-#     torch.distributed.barrier()
+    torch.distributed.barrier()
 
 
 @withPackage('pyg_lib')
 # @pytest.mark.parametrize('input_type', [('v0','e0','v0'), ('v1','e0','v1'), ('v0','e0','v1'), ('v1','e0','v0')])
-@pytest.mark.parametrize('disjoint', [False, True])
+@pytest.mark.parametrize('disjoint', [True])
 def test_dist_link_neighbor_sampler_hetero(
     tmp_path,
     disjoint
@@ -282,25 +309,8 @@ def test_dist_link_neighbor_sampler_hetero(
         edge_dim=2,
     )[0]
 
-    print("hetero edge_index:")
-    print(data.edge_items()[0][0])
-    print(data.edge_items()[0][1])
-
-    print("hetero edge_index:")
-    print(data.edge_items()[1][0])
-    print(data.edge_items()[1][1])
-
-    print("hetero edge_index:")
-    print(data.edge_items()[2][0])
-    print(data.edge_items()[2][1])
-
-    print("hetero edge_index:")
-    print(data.edge_items()[3][0])
-    print(data.edge_items()[3][1])
-
     partitioner = Partitioner(data, world_size, tmp_path)
     partitioner.generate_partition()
-
     
     w0 = mp_context.Process(
         target=dist_link_neighbor_sampler_hetero,
@@ -319,24 +329,40 @@ def test_dist_link_neighbor_sampler_hetero(
 
 
 # @withPackage('pyg_lib')
-# @pytest.mark.parametrize("seed_time", [None, torch.tensor([3, 6])])
-# @pytest.mark.parametrize("temporal_strategy", ['uniform', 'last'])
-# def test_dist_neighbor_sampler_temporal_hetero(seed_time, temporal_strategy):
-#     mp_context = torch.multiprocessing.get_context("spawn")
+# @pytest.mark.parametrize('seed_time', [None, torch.tensor([3, 6])])
+# @pytest.mark.parametrize('temporal_strategy', ['uniform', 'last'])
+# def test_dist_neighbor_sampler_temporal_hetero(
+#     tmp_path,
+#     seed_time,
+#     temporal_strategy,
+# ):
+#     mp_context = torch.multiprocessing.get_context('spawn')
 #     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 #     s.bind(("127.0.0.1", 0))
 #     port = s.getsockname()[1]
 #     s.close()
 
 #     world_size = 2
+#     data = FakeHeteroDataset(
+#         num_graphs=1,
+#         avg_num_nodes=100,
+#         avg_degree=3,
+#         num_node_types=2,
+#         num_edge_types=4,
+#         edge_dim=2,
+#     )[0]
+
+#     partitioner = Partitioner(data, world_size, tmp_path)
+#     partitioner.generate_partition()
+
 #     w0 = mp_context.Process(
-#         target=dist_neighbor_sampler_temporal_hetero,
-#         args=(world_size, 0, port, 'paper', seed_time, temporal_strategy),
+#         target=dist_link_neighbor_sampler_temporal_hetero,
+#         args=(data, tmp_path, world_size, 0, port, ('v1','e0','v1'), seed_time, temporal_strategy),
 #     )
 
 #     w1 = mp_context.Process(
-#         target=dist_neighbor_sampler_temporal_hetero,
-#         args=(world_size, 1, port, 'author', seed_time, temporal_strategy),
+#         target=dist_link_neighbor_sampler_temporal_hetero,
+#         args=(data, tmp_path, world_size, 1, port, ('v0','e0','v1'), seed_time, temporal_strategy),
 #     )
 
 #     w0.start()

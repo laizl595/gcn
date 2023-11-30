@@ -49,17 +49,6 @@ class EdgeHeteroSamplerInput(CastMixin):
         self.node_dict = node_dict
         self.time_dict = time_dict
         self.input_type = input_type
-
-    # def __getitem__(self, index: Union[Tensor, Any]) -> 'NodeSamplerInput':
-    #     if not isinstance(index, Tensor):
-    #         index = torch.tensor(index, dtype=torch.long)
-
-    #     return NodeSamplerInput(
-    #         self.input_id[index] if self.input_id is not None else index,
-    #         self.node[index],
-    #         self.time[index] if self.time is not None else None,
-    #         self.input_type,
-    #     )
     
 
 @dataclass
