@@ -61,18 +61,6 @@ def dist_link_neighbor_sampler_hetero(
 ):
     dist_data, graph_store_other = create_hetero_data(tmp_path, rank)
 
-    print("dist hetero data:")
-    print("rank=")
-    print(rank)
-    print("'v0','e0','v1'")
-    print(dist_data[1]._edge_index[(('v0','e0','v1'), 'coo')])
-    print("'v1','e0','v1'")
-    print(dist_data[1]._edge_index[(('v1','e0','v1'), 'coo')])
-    print("'v0','e0','v0'")
-    print(dist_data[1]._edge_index[(('v0','e0','v0'), 'coo')])
-    print("'v1','e0','v0'")
-    print(dist_data[1]._edge_index[(('v1','e0','v0'), 'coo')])
-
     current_ctx = DistContext(
         rank=rank,
         global_rank=rank,
@@ -123,8 +111,6 @@ def dist_link_neighbor_sampler_hetero(
     row_1 = input_type_edge_index_other[0][0]
     col_1 = input_type_edge_index_other[1][0]
 
-    print(rank)
-    print(dist_data[1].node_pb)
     # Seed nodes:
     input_row = torch.tensor([row_0, row_1], dtype=torch.int64)
     input_col =  torch.tensor([col_0, col_1], dtype=torch.int64)
@@ -179,18 +165,6 @@ def dist_link_neighbor_sampler_temporal_hetero(
 ):
     dist_data, graph_store_other = create_hetero_data(tmp_path, rank)
 
-    print("dist hetero data:")
-    print("rank=")
-    print(rank)
-    print("'v0','e0','v1'")
-    print(dist_data[1]._edge_index[(('v0','e0','v1'), 'coo')])
-    print("'v1','e0','v1'")
-    print(dist_data[1]._edge_index[(('v1','e0','v1'), 'coo')])
-    print("'v0','e0','v0'")
-    print(dist_data[1]._edge_index[(('v0','e0','v0'), 'coo')])
-    print("'v1','e0','v0'")
-    print(dist_data[1]._edge_index[(('v1','e0','v0'), 'coo')])
-
     current_ctx = DistContext(
         rank=rank,
         global_rank=rank,
@@ -241,8 +215,6 @@ def dist_link_neighbor_sampler_temporal_hetero(
     row_1 = input_type_edge_index_other[0][0]
     col_1 = input_type_edge_index_other[1][0]
 
-    print(rank)
-    print(dist_data[1].node_pb)
     # Seed nodes:
     input_row = torch.tensor([row_0, row_1], dtype=torch.int64)
     input_col =  torch.tensor([col_0, col_1], dtype=torch.int64)
@@ -287,8 +259,7 @@ def dist_link_neighbor_sampler_temporal_hetero(
 
 
 @withPackage('pyg_lib')
-# @pytest.mark.parametrize('input_type', [('v0','e0','v0'), ('v1','e0','v1'), ('v0','e0','v1'), ('v1','e0','v0')])
-@pytest.mark.parametrize('disjoint', [True])
+@pytest.mark.parametrize('disjoint', [False, True])
 def test_dist_link_neighbor_sampler_hetero(
     tmp_path,
     disjoint
@@ -326,46 +297,3 @@ def test_dist_link_neighbor_sampler_hetero(
     w1.start()
     w0.join()
     w1.join()
-
-
-# @withPackage('pyg_lib')
-# @pytest.mark.parametrize('seed_time', [None, torch.tensor([3, 6])])
-# @pytest.mark.parametrize('temporal_strategy', ['uniform', 'last'])
-# def test_dist_neighbor_sampler_temporal_hetero(
-#     tmp_path,
-#     seed_time,
-#     temporal_strategy,
-# ):
-#     mp_context = torch.multiprocessing.get_context('spawn')
-#     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-#     s.bind(("127.0.0.1", 0))
-#     port = s.getsockname()[1]
-#     s.close()
-
-#     world_size = 2
-#     data = FakeHeteroDataset(
-#         num_graphs=1,
-#         avg_num_nodes=100,
-#         avg_degree=3,
-#         num_node_types=2,
-#         num_edge_types=4,
-#         edge_dim=2,
-#     )[0]
-
-#     partitioner = Partitioner(data, world_size, tmp_path)
-#     partitioner.generate_partition()
-
-#     w0 = mp_context.Process(
-#         target=dist_link_neighbor_sampler_temporal_hetero,
-#         args=(data, tmp_path, world_size, 0, port, ('v1','e0','v1'), seed_time, temporal_strategy),
-#     )
-
-#     w1 = mp_context.Process(
-#         target=dist_link_neighbor_sampler_temporal_hetero,
-#         args=(data, tmp_path, world_size, 1, port, ('v0','e0','v1'), seed_time, temporal_strategy),
-#     )
-
-#     w0.start()
-#     w1.start()
-#     w0.join()
-#     w1.join()

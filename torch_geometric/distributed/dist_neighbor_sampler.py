@@ -125,6 +125,7 @@ class DistNeighborSampler:
         self.node_types = self._sampler.node_types
         self.edge_types = self._sampler.edge_types
         self.node_time = self._sampler.node_time
+        self.edge_time = self._sampler.edge_time
 
         rpc_sample_callee = RPCSamplingCallee(self)
         self.rpc_sample_callee_id = rpc_register(rpc_sample_callee)
@@ -206,20 +207,21 @@ class DistNeighborSampler:
             results between machines after each layer.
         """
         input_type = inputs.input_type
-
         self.input_type = input_type
 
         if isinstance(inputs, NodeSamplerInput):
             seed = inputs.node.to(self.device)
 
-        seed_time = None
+        seed_time: Optional[Tensor] = None
         if self.time_attr is not None:
             if inputs.time is not None:
                 seed_time = inputs.time.to(self.device)
-            else:
+            elif self.node_time is not None:
                 seed_time = self.node_time[
                     seed] if not self.is_hetero else self.node_time[
                         input_type][seed]
+            else:
+                raise ValueError("Seed time needs to be specified")
 
         if self.is_hetero:
             if input_type is None:
@@ -329,9 +331,6 @@ class DistNeighborSampler:
                     node_dict.with_dupl[dst] = torch.cat(
                         [node_dict.with_dupl[dst], out.node])
 
-                    print(f'dst={dst}')
-                    print(f'node_dict.with_dupl[dst]={node_dict.with_dupl[dst]}')
-
                     edge_dict[edge_type] = torch.cat(
                         [edge_dict[edge_type], out.edge])
 
@@ -397,7 +396,10 @@ class DistNeighborSampler:
                 out = await self.sample_one_hop(src, one_hop_num, seed_time,
                                                 src_batch)
                 if out.node.numel() == 0:
-                    # No neighbors were sampled
+                    # no neighbors were sampled
+                    num_zero_layers = self.num_hops - i
+                    num_sampled_nodes += num_zero_layers * [0]
+                    num_sampled_edges += num_zero_layers * [0]
                     break
 
                 # Remove duplicates
@@ -890,12 +892,15 @@ class DistNeighborSampler:
             colptr = self._sampler.colptr
             row = self._sampler.row
             node_time = self.node_time
+            edge_time = self.edge_time
         else:
             rel_type = '__'.join(edge_type)
             colptr = self._sampler.colptr_dict[rel_type]
             row = self._sampler.row_dict[rel_type]
             node_time = self.node_time.get(edge_type[2],
                                            None) if self.node_time else None
+            edge_time = self.edge_time.get(edge_type[2],
+                                           None) if self.edge_time else None
 
         out = torch.ops.pyg.dist_neighbor_sample(
             colptr,
@@ -903,18 +908,18 @@ class DistNeighborSampler:
             input_nodes.to(colptr.dtype),
             num_neighbors,
             node_time,
-            None,  # edge_time
+            edge_time,
             seed_time,
             None,  # TODO: edge_weight
             True,  # csc
             self.replace,
             self.subgraph_type != SubgraphType.induced,
-            self.disjoint and node_time is not None,
+            self.disjoint and self.time_attr is not None,
             self.temporal_strategy,
         )
         node, edge, cumsum_neighbors_per_node = out
 
-        if self.disjoint and node_time is not None:
+        if self.disjoint and self.time_attr is not None:
             # We create a batch during the step of merging sampler outputs.
             _, node = node.t().contiguous()
 
