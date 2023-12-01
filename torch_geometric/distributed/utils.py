@@ -1,5 +1,5 @@
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -9,7 +9,7 @@ from torch import Tensor
 from torch_geometric.data import HeteroData
 from torch_geometric.distributed import LocalFeatureStore, LocalGraphStore
 from torch_geometric.sampler import SamplerOutput
-from torch_geometric.typing import EdgeType, EdgeTypeStr, NodeType, OptTensor
+from torch_geometric.typing import EdgeType, NodeType, OptTensor
 from torch_geometric.utils.mixin import CastMixin
 
 
@@ -41,22 +41,28 @@ class EdgeHeteroSamplerInput(CastMixin):
     ):
         if input_id is not None:
             input_id = input_id.cpu()
-        node_dict = {node_type: node.cpu() for node_type, node in node_dict.items()}
+        node_dict = {
+            node_type: node.cpu()
+            for node_type, node in node_dict.items()
+        }
         if time_dict is not None:
-            time_dict = {node_type: time.cpu() for node_type, time in time_dict.items()}
+            time_dict = {
+                node_type: time.cpu()
+                for node_type, time in time_dict.items()
+            }
 
         self.input_id = input_id
         self.node_dict = node_dict
         self.time_dict = time_dict
         self.input_type = input_type
-    
+
 
 @dataclass
 class NodeDict:
-    r"""Class used during heterogeneous sampling:
-    1) The nodes to serve as source nodes in the next layer
-    2) The nodes with duplicates that are further needed to create COO output
-    3) The output nodes without duplicates
+    r"""Class used during heterogeneous sampling.
+    1) The nodes to serve as source nodes in the next layer.
+    2) The nodes with duplicates that are further needed to create COO output.
+    3) The output nodes without duplicates.
     """
     def __init__(self, node_types, num_hops):
         self.src: Dict[NodeType, List[Tensor]] = defaultdict(list)
@@ -72,12 +78,12 @@ class NodeDict:
 
 @dataclass
 class BatchDict:
-    r"""Class used during disjoint heterogeneous sampling:
+    r"""Class used during disjoint heterogeneous sampling.
     1) The batch to serve as initial subgraph IDs for source nodes in the next
-       layer
+       layer.
     2) The subgraph IDs with duplicates that are further needed to create COO
-       output
-    3) The output subgraph IDs without duplicates
+       output.
+    3) The output subgraph IDs without duplicates.
     """
     def __init__(self, node_types, num_hops):
         self.src: Dict[NodeType, List[Tensor]] = defaultdict(list)

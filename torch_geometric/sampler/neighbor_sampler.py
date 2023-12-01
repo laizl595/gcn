@@ -141,7 +141,6 @@ class NeighborSampler(BaseSampler):
                 is_sorted=is_sorted, node_time_dict=self.node_time,
                 edge_time_dict=self.edge_time)
 
-
             self.row_dict = remap_keys(row_dict, self.to_rel_type)
             self.colptr_dict = remap_keys(colptr_dict, self.to_rel_type)
 
@@ -253,8 +252,6 @@ class NeighborSampler(BaseSampler):
                 row_dict, colptr_dict, self.perm = graph_store.csc()
                 self.row_dict = remap_keys(row_dict, self.to_rel_type)
                 self.colptr_dict = remap_keys(colptr_dict, self.to_rel_type)
-
-
 
         if (self.edge_time is not None
                 and not torch_geometric.typing.WITH_EDGE_TIME_NEIGHBOR_SAMPLE):

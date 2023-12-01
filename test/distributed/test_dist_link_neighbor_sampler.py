@@ -15,7 +15,6 @@ from torch_geometric.distributed.rpc import init_rpc
 from torch_geometric.sampler import EdgeSamplerInput, NeighborSampler
 from torch_geometric.sampler.neighbor_sampler import edge_sample
 from torch_geometric.testing import onlyLinux, withPackage
-from torch_geometric.typing import WITH_EDGE_TIME_NEIGHBOR_SAMPLE
 
 
 def create_data(rank, world_size, time_attr: str = 'time'):

@@ -123,10 +123,8 @@ class ClusterData(torch.utils.data.Dataset):
             ).to(edge_index.device)
 
         if cluster is None:
-            raise ImportError(
-                f"'{self.__class__.__name__}' requires either "
-                f"'pyg-lib' or 'torch-sparse'"
-            )
+            raise ImportError(f"'{self.__class__.__name__}' requires either "
+                              f"'pyg-lib' or 'torch-sparse'")
 
         return cluster
 
@@ -141,7 +139,8 @@ class ClusterData(torch.utils.data.Dataset):
         # Permute `edge_index` based on node permutation:
         edge_perm = torch.arange(edge_index.size(1), device=edge_index.device)
         arange = torch.empty_like(node_perm)
-        arange[node_perm] = torch.arange(cluster.numel(), device=cluster.device)
+        arange[node_perm] = torch.arange(cluster.numel(),
+                                         device=cluster.device)
         edge_index = arange[edge_index]
 
         # Compute final CSR representation:
@@ -252,7 +251,6 @@ class ClusterLoader(torch.utils.data.DataLoader):
             :class:`torch.utils.data.DataLoader`, such as :obj:`batch_size`,
             :obj:`shuffle`, :obj:`drop_last` or :obj:`num_workers`.
     """
-
     def __init__(self, cluster_data, **kwargs):
         self.cluster_data = cluster_data
         iterator = range(len(cluster_data))

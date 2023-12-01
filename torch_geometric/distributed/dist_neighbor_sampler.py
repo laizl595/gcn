@@ -1,8 +1,7 @@
 import itertools
 import logging
-
-from collections import defaultdict
 import math
+from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -25,8 +24,8 @@ from torch_geometric.distributed.rpc import (
     shutdown_rpc,
 )
 from torch_geometric.distributed.utils import (
-    EdgeHeteroSamplerInput,
     BatchDict,
+    EdgeHeteroSamplerInput,
     NodeDict,
     remove_duplicates,
 )
@@ -211,6 +210,10 @@ class DistNeighborSampler:
 
         if isinstance(inputs, NodeSamplerInput):
             seed = inputs.node.to(self.device)
+            batch_size = len(inputs.node)
+            metadata = (inputs.input_id, inputs.time, batch_size)
+        else:
+            metadata = None
 
         seed_time: Optional[Tensor] = None
         if self.time_attr is not None:
@@ -229,12 +232,12 @@ class DistNeighborSampler:
 
             if isinstance(inputs, NodeSamplerInput):
                 seed_dict: Dict[NodeType, Tensor] = {input_type: seed}
-                seed_time_dict: Dict[NodeType, Tensor] = {input_type: seed_time}
+                seed_time_dict: Dict[NodeType, Tensor] = {
+                    input_type: seed_time
+                }
             else:
                 seed_dict = inputs.node_dict
                 seed_time_dict = inputs.time_dict
-            
-            metadata = (seed_dict, seed_time_dict) # to be checked!
 
             node_dict = NodeDict(self.node_types, self.num_hops)
             batch_dict = BatchDict(self.node_types, self.num_hops)
@@ -375,8 +378,6 @@ class DistNeighborSampler:
                 metadata=metadata,
             )
         else:
-            metadata = (seed, seed_time)
-
             src = seed
             node = src
 
@@ -560,11 +561,11 @@ class DistNeighborSampler:
                         input_id=inputs.input_id,
                         node_dict=seed_dict,
                         time_dict=seed_time_dict,
-                        input_type=input_type[-1], # csc
+                        input_type=input_type[-1],  # csc
                     ))
 
-            else:  # Only a single node type: Merge both source and destination.
-
+            else:
+                # Only a single node type: Merge both source and destination.
                 seed = torch.cat([src, dst], dim=0)
 
                 if not disjoint:
@@ -584,7 +585,7 @@ class DistNeighborSampler:
                         input_type=input_type[0],
                     ))
 
-            # Enhance `out` by label information ##################################
+            # Enhance `out` by label information ##############################
             if disjoint:
                 for key, batch in out.batch.items():
                     out.batch[key] = batch % num_pos
@@ -593,9 +594,11 @@ class DistNeighborSampler:
                 if disjoint:
                     if input_type[0] != input_type[-1]:
                         edge_label_index = torch.arange(num_pos + num_neg)
-                        edge_label_index = edge_label_index.repeat(2).view(2, -1)
+                        edge_label_index = edge_label_index.repeat(2).view(
+                            2, -1)
                     else:
-                        edge_label_index = torch.arange(2 * (num_pos + num_neg))
+                        edge_label_index = torch.arange(2 *
+                                                        (num_pos + num_neg))
                         edge_label_index = edge_label_index.view(2, -1)
                 else:
                     if input_type[0] != input_type[-1]:
@@ -606,15 +609,16 @@ class DistNeighborSampler:
                     else:
                         edge_label_index = inverse_seed.view(2, -1)
 
-                out.metadata = (input_id, edge_label_index, edge_label, src_time)
+                out.metadata = (input_id, edge_label_index, edge_label,
+                                src_time)
 
             elif neg_sampling.is_triplet():
                 if disjoint:
                     src_index = torch.arange(num_pos)
                     if input_type[0] != input_type[-1]:
                         dst_pos_index = torch.arange(num_pos)
-                        # `dst_neg_index` needs to be offset such that indices with
-                        # offset `num_pos` belong to the same triplet:
+                        # `dst_neg_index` needs to be offset such that indices
+                        # with offset `num_pos` belong to the same triplet:
                         dst_neg_index = torch.arange(
                             num_pos, seed_dict[input_type[-1]].numel())
                         dst_neg_index = dst_neg_index.view(-1, num_pos).t()
@@ -818,7 +822,6 @@ class DistNeighborSampler:
 
         Returns merged samplers outputs from local / remote machines.
         """
-
         src = None if not self.is_hetero else edge_type[2]
         partition_ids = self.graph_store.get_partition_ids_from_nids(srcs, src)
         partition_orders = torch.zeros(len(partition_ids), dtype=torch.long)
@@ -999,9 +1002,6 @@ class DistNeighborSampler:
                 efeats = None
 
         output.metadata = (*output.metadata, nfeats, nlabels, efeats)
-        # if self.is_hetero: # check if this is needed
-        #     output.row = remap_keys(output.row, self._sampler.to_edge_type)
-        #     output.col = remap_keys(output.col, self._sampler.to_edge_type)
         return output
 
     @property

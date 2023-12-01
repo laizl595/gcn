@@ -4,7 +4,6 @@ import socket
 import pytest
 import torch
 
-from torch_geometric.data import HeteroData
 from torch_geometric.datasets import FakeHeteroDataset
 from torch_geometric.distributed import (
     LocalFeatureStore,
@@ -59,18 +58,6 @@ def dist_neighbor_sampler_hetero(
 ):
     dist_data = create_hetero_data(tmp_path, rank)
 
-    print("dist hetero data:")
-    print("rank=")
-    print(rank)
-    print("'v0','e0','v1'")
-    print(dist_data[1]._edge_index[(('v0','e0','v1'), 'coo')])
-    print("'v1','e0','v1'")
-    print(dist_data[1]._edge_index[(('v1','e0','v1'), 'coo')])
-    print("'v0','e0','v0'")
-    print(dist_data[1]._edge_index[(('v0','e0','v0'), 'coo')])
-    print("'v1','e0','v0'")
-    print(dist_data[1]._edge_index[(('v1','e0','v0'), 'coo')])
-
     current_ctx = DistContext(
         rank=rank,
         global_rank=rank,
@@ -116,9 +103,6 @@ def dist_neighbor_sampler_hetero(
     node_0 = node_pb_list.index(0)
     node_1 = node_pb_list.index(1)
 
-    print(rank)
-    print(dist_data[1].node_pb)
-
     input_node = torch.tensor([node_0, node_1], dtype=torch.int64)
 
     inputs = NodeSamplerInput(
@@ -130,7 +114,7 @@ def dist_neighbor_sampler_hetero(
     # Evaluate distributed node sample function:
     out_dist = dist_sampler.event_loop.run_task(
         coro=dist_sampler.node_sample(inputs))
-    
+
     torch.distributed.barrier()
 
     sampler = NeighborSampler(
@@ -146,7 +130,8 @@ def dist_neighbor_sampler_hetero(
     for k in data.node_types:
         assert torch.equal(out_dist.node[k].sort()[0], out.node[k].sort()[0])
         if disjoint:
-            assert torch.equal(out_dist.batch[k].sort()[0], out.batch[k].sort()[0])
+            assert torch.equal(out_dist.batch[k].sort()[0],
+                               out.batch[k].sort()[0])
         assert out_dist.num_sampled_nodes[k] == out.num_sampled_nodes[k]
 
     torch.distributed.barrier()
@@ -154,10 +139,7 @@ def dist_neighbor_sampler_hetero(
 
 @withPackage('pyg_lib')
 @pytest.mark.parametrize('disjoint', [False, True])
-def test_dist_neighbor_sampler_hetero(
-    tmp_path,
-    disjoint
-):
+def test_dist_neighbor_sampler_hetero(tmp_path, disjoint):
     mp_context = torch.multiprocessing.get_context('spawn')
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(("127.0.0.1", 0))
@@ -174,26 +156,9 @@ def test_dist_neighbor_sampler_hetero(
         edge_dim=2,
     )[0]
 
-    print("hetero edge_index:")
-    print(data.edge_items()[0][0])
-    print(data.edge_items()[0][1])
-
-    print("hetero edge_index:")
-    print(data.edge_items()[1][0])
-    print(data.edge_items()[1][1])
-
-    print("hetero edge_index:")
-    print(data.edge_items()[2][0])
-    print(data.edge_items()[2][1])
-
-    print("hetero edge_index:")
-    print(data.edge_items()[3][0])
-    print(data.edge_items()[3][1])
-
     partitioner = Partitioner(data, world_size, tmp_path)
     partitioner.generate_partition()
 
-    
     w0 = mp_context.Process(
         target=dist_neighbor_sampler_hetero,
         args=(data, tmp_path, world_size, 0, port, 'v0', disjoint),
